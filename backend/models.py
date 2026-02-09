@@ -113,6 +113,40 @@ class WSMessage(BaseModel):
 # --- Auth Management ---
 
 
+# --- Projects ---
+
+
+class CreateProjectRequest(BaseModel):
+    name: str
+    description: str | None = None
+    repo_path: str
+    color: str | None = None
+    icon: str | None = None
+
+
+class ProjectInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+    repo_path: str
+    color: str
+    icon: str
+    created_at: datetime
+    updated_at: datetime
+    session_count: int = 0
+
+
+class UpdateProjectRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    repo_path: str | None = None
+    color: str | None = None
+    icon: str | None = None
+
+
+# --- Auth Management ---
+
+
 class AuthStatusResponse(BaseModel):
     account_id: str
     status: AuthStatus

@@ -14,6 +14,9 @@ node_modules/
 frontend/dist/
 .vite/
 
+# Compiled JS alongside TSX source (Vite handles compilation)
+frontend/src/**/*.js
+
 # Environment
 .env
 .env.local

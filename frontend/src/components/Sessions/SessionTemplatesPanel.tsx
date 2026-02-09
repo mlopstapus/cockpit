@@ -10,8 +10,7 @@ export default function SessionTemplatesPanel() {
   const removeTemplate = useCockpit((s) => s.removeTemplate);
   const sessions = useCockpit((s) => s.sessions);
   const setSessions = useCockpit((s) => s.setSessions);
-  const setSelectedSessionId = useCockpit((s) => s.setSelectedSessionId);
-  const setActiveTab = useCockpit((s) => s.setActiveTab);
+  const navigateToSession = useCockpit((s) => s.navigateToSession);
 
   const [showForm, setShowForm] = useState(false);
   const [templateName, setTemplateName] = useState("");
@@ -55,8 +54,7 @@ export default function SessionTemplatesPanel() {
       });
 
       setSessions([...sessions, newSession]);
-      setSelectedSessionId(newSession.id);
-      setActiveTab("chat");
+      navigateToSession(newSession.id);
     } catch (err) {
       console.error("Failed to create session from template:", err);
       alert("Failed to create session");

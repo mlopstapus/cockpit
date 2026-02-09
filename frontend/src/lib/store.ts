@@ -1,21 +1,30 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { SessionInfo, AccountInfo, SessionTemplate } from "../types";
+import type { SessionInfo, AccountInfo, SessionTemplate, ProjectInfo } from "../types";
 
-export type TabName = "sessions" | "chat" | "accounts" | "settings";
+export type ViewName = "sessions" | "chat" | "accounts" | "settings" | "projects";
 
 interface CockpitStore {
   // Navigation
-  activeTab: TabName;
-  setActiveTab: (tab: TabName) => void;
+  currentView: ViewName;
+  setCurrentView: (view: ViewName) => void;
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
 
-  // Selected session
+  // Selected entities
   selectedSessionId: string | null;
   setSelectedSessionId: (id: string | null) => void;
+  selectedProjectId: string | null;
+  setSelectedProjectId: (id: string | null) => void;
 
   // Sessions
   sessions: SessionInfo[];
   setSessions: (sessions: SessionInfo[]) => void;
+
+  // Projects
+  projects: ProjectInfo[];
+  setProjects: (projects: ProjectInfo[]) => void;
 
   // Accounts
   accounts: AccountInfo[];
@@ -33,19 +42,31 @@ interface CockpitStore {
 
   error: string | null;
   setError: (error: string | null) => void;
+
+  // Helpers
+  navigateToSession: (sessionId: string) => void;
+  navigateToProject: (projectId: string) => void;
 }
 
 export const useCockpit = create<CockpitStore>()(
   persist(
     (set) => ({
-      activeTab: "sessions",
-      setActiveTab: (tab) => set({ activeTab: tab }),
+      currentView: "sessions",
+      setCurrentView: (view) => set({ currentView: view, sidebarOpen: false }),
+      sidebarOpen: false,
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
+      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
       selectedSessionId: null,
       setSelectedSessionId: (id) => set({ selectedSessionId: id }),
+      selectedProjectId: null,
+      setSelectedProjectId: (id) => set({ selectedProjectId: id }),
 
       sessions: [],
       setSessions: (sessions) => set({ sessions }),
+
+      projects: [],
+      setProjects: (projects) => set({ projects }),
 
       accounts: [],
       setAccounts: (accounts) => set({ accounts }),
@@ -64,12 +85,18 @@ export const useCockpit = create<CockpitStore>()(
 
       error: null,
       setError: (error) => set({ error }),
+
+      navigateToSession: (sessionId) =>
+        set({ selectedSessionId: sessionId, currentView: "chat", sidebarOpen: false }),
+      navigateToProject: (projectId) =>
+        set({ selectedProjectId: projectId, currentView: "projects", sidebarOpen: false }),
     }),
     {
       name: "cockpit-store",
       partialize: (state) => ({
-        activeTab: state.activeTab,
+        currentView: state.currentView,
         selectedSessionId: state.selectedSessionId,
+        selectedProjectId: state.selectedProjectId,
         templates: state.templates,
       }),
     }

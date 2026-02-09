@@ -4,15 +4,10 @@ import { api } from "../../lib/api";
 
 interface InputBarProps {
   sessionId: string;
-  onSendMessage: (content: string) => void;
   isConnected: boolean;
 }
 
-export default function InputBar({
-  sessionId,
-  onSendMessage,
-  isConnected,
-}: InputBarProps) {
+export default function InputBar({ sessionId, isConnected }: InputBarProps) {
   const [message, setMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -25,16 +20,15 @@ export default function InputBar({
     setIsSending(true);
 
     try {
+      // Send via REST only — WebSocket handles output streaming
       await api.sendMessage(sessionId, content);
-      onSendMessage(content);
     } catch (err) {
       console.error("Failed to send message:", err);
-      setMessage(content); // Restore message on error
+      setMessage(content);
     } finally {
       setIsSending(false);
     }
 
-    // Reset textarea height
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
     }
@@ -49,15 +43,13 @@ export default function InputBar({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
-
-    // Auto-resize textarea
     const textarea = e.target;
     textarea.style.height = "auto";
-    textarea.style.height = Math.min(textarea.scrollHeight, 100) + "px";
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
   };
 
   return (
-    <div className="border-t border-gray-800 bg-gray-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+    <div className="border-t border-gray-800 bg-base p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
       <div className="flex gap-2 items-end">
         <textarea
           ref={inputRef}
@@ -66,14 +58,14 @@ export default function InputBar({
           onKeyDown={handleKeyDown}
           placeholder="Ask Claude something..."
           disabled={!isConnected || isSending}
-          className="flex-1 resize-none rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm placeholder-gray-500 focus:border-accent focus:outline-none disabled:opacity-50"
+          className="flex-1 resize-none rounded-xl border border-gray-700 bg-gray-800/50 px-4 py-2.5 text-sm placeholder-gray-500 focus:border-accent focus:outline-none disabled:opacity-50"
           rows={1}
           maxLength={2000}
         />
         <button
           onClick={handleSend}
           disabled={!message.trim() || !isConnected || isSending}
-          className="flex-shrink-0 rounded-lg bg-accent px-3 py-2 text-base transition hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center"
+          className="flex-shrink-0 rounded-xl bg-accent p-2.5 text-white transition hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label="Send message"
         >
           {isSending ? (
@@ -83,9 +75,6 @@ export default function InputBar({
           )}
         </button>
       </div>
-      <p className="mt-2 text-xs text-gray-500">
-        {message.length}/2000
-      </p>
     </div>
   );
 }
