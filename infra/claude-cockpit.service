@@ -1,0 +1,45 @@
+# /etc/systemd/system/claude-cockpit.service
+#
+# Docker Compose-based claude-cockpit service
+#
+# Install:
+#   sudo cp claude-cockpit.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable claude-cockpit
+#   sudo systemctl start claude-cockpit
+#
+# Logs:
+#   journalctl -u claude-cockpit -f
+#   docker-compose logs -f api
+
+[Unit]
+Description=Claude Cockpit Services (Docker Compose)
+After=network.target tailscaled.service docker.service
+Wants=tailscaled.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=YOUR-USER
+Group=docker
+WorkingDirectory=/home/YOUR-USER/claude-cockpit
+
+# Load environment variables from .env
+EnvironmentFile=/home/YOUR-USER/claude-cockpit/.env
+
+# Start all services with docker-compose
+ExecStart=/usr/bin/docker-compose up
+
+# Stop services gracefully
+ExecStop=/usr/bin/docker-compose down
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security limits
+NoNewPrivileges=true
+MemoryLimit=4G
+
+[Install]
+WantedBy=multi-user.target

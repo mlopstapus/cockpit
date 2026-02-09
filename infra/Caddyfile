@@ -1,0 +1,46 @@
+# Caddyfile for Claude Cockpit with Docker Compose
+# Serves frontend + proxies API over Tailscale HTTPS
+#
+# In Docker Compose environment:
+# - api service is accessible at http://api:8000 (internal to compose network)
+# - frontend service is accessible at http://frontend:3000 (internal to compose network)
+#
+# For production with Tailscale:
+#   1. Tailscale certs are mounted at /var/lib/tailscale/certs/
+#   2. Domain: your-nuc.tailnet-name.ts.net
+#   3. Caddy is running in compose with access to both services
+
+# Development mode (http://localhost)
+localhost {
+    # API proxy
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    handle /ws/* {
+        reverse_proxy api:8000
+    }
+
+    # Frontend
+    handle {
+        reverse_proxy frontend:3000
+    }
+}
+
+# Production mode (Tailscale https)
+# Uncomment and replace YOUR-NUC-NAME and YOUR-TAILNET
+# your-nuc-name.YOUR-TAILNET.ts.net {
+#     tls /var/lib/tailscale/certs/your-nuc-name.YOUR-TAILNET.ts.net.crt /var/lib/tailscale/certs/your-nuc-name.YOUR-TAILNET.ts.net.key
+#
+#     handle /api/* {
+#         reverse_proxy api:8000
+#     }
+#
+#     handle /ws/* {
+#         reverse_proxy api:8000
+#     }
+#
+#     handle {
+#         reverse_proxy frontend:3000
+#     }
+# }

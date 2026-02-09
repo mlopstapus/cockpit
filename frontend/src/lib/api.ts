@@ -1,0 +1,100 @@
+/* Claude Cockpit — API Client */
+import type {
+  SessionInfo,
+  RepoInfo,
+  AccountInfo,
+  CreateSessionRequest,
+  SendMessageRequest,
+} from "../types";
+
+// In production, this will be the same origin (served by Caddy)
+// In dev, point to the NUC's FastAPI server
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || "";
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || `API error: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export const api = {
+  // Sessions
+  listSessions: () => request<SessionInfo[]>("/api/sessions"),
+
+  createSession: (body: CreateSessionRequest) =>
+    request<SessionInfo>("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getSession: (id: string) => request<SessionInfo>(`/api/sessions/${id}`),
+
+  sendMessage: (id: string, content: string) =>
+    request<{ status: string }>(`/api/sessions/${id}/send`, {
+      method: "POST",
+      body: JSON.stringify({ content } satisfies SendMessageRequest),
+    }),
+
+  sendOneshot: (id: string, content: string) =>
+    request<{ result: string }>(`/api/sessions/${id}/oneshot`, {
+      method: "POST",
+      body: JSON.stringify({ content } satisfies SendMessageRequest),
+    }),
+
+  stopSession: (id: string) =>
+    request<{ status: string }>(`/api/sessions/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Repos
+  listRepos: () => request<RepoInfo[]>("/api/repos"),
+
+  // Accounts
+  listAccounts: () => request<AccountInfo[]>("/api/accounts"),
+
+  resetAccountLimit: (id: string) =>
+    request<{ status: string }>(`/api/accounts/${id}/reset-limit`, {
+      method: "POST",
+    }),
+
+  // Account Authentication
+  getAuthStatus: (id: string) =>
+    request<{ account_id: string; status: string; needs_reauth: boolean }>(
+      `/api/accounts/${id}/auth-status`
+    ),
+
+  startAuthentication: (id: string) =>
+    request<{ account_id: string; status: string; message: string }>(
+      `/api/accounts/${id}/authenticate`,
+      { method: "POST" }
+    ),
+
+  confirmAuth: (id: string) =>
+    request<{ account_id: string; status: string }>(
+      `/api/accounts/${id}/auth-confirm`,
+      { method: "POST" }
+    ),
+
+  // Health
+  health: () => request<Record<string, unknown>>("/api/health"),
+};
+
+// WebSocket helper
+export function createSessionSocket(sessionId: string): WebSocket {
+  const wsBase = API_BASE.replace(/^http/, "ws") || `ws://${window.location.host}`;
+  return new WebSocket(`${wsBase}/ws/sessions/${sessionId}`);
+}
+
+// WebSocket helper for auth streaming
+export function createAuthSocket(accountId: string): WebSocket {
+  const wsBase = API_BASE.replace(/^http/, "ws") || `ws://${window.location.host}`;
+  return new WebSocket(`${wsBase}/ws/accounts/${accountId}/auth-stream`);
+}
