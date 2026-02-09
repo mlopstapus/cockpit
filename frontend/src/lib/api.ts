@@ -82,6 +82,14 @@ export const api = {
   // Repos
   listRepos: () => request<RepoInfo[]>("/api/repos"),
 
+  browseDirectories: (path?: string) =>
+    request<{
+      current: string;
+      parent: string | null;
+      is_git_repo: boolean;
+      directories: Array<{ name: string; path: string; is_git_repo: boolean }>;
+    }>(`/api/repos/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+
   // Accounts
   listAccounts: () => request<AccountInfo[]>("/api/accounts"),
 
