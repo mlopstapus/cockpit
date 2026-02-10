@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     max_concurrent_sessions: int = 5
     session_timeout_minutes: int = 60
 
+    # Browse root — the host path mounted into the container for folder browsing
+    # In Docker: /projects (user's home mounted via PROJECTS_PATH). Locally: ~.
+    browse_root: str = "/projects"
+
     def get_profiles_dir(self) -> Path:
         return Path(self.profiles_dir).expanduser()
 

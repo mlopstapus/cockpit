@@ -33,11 +33,13 @@ services:
       DATABASE_URL: postgresql://cockpit:${DB_PASSWORD:-cockpit-dev-password}@postgres:5432/cockpit
       CLAUDE_CONFIG_DIR: /home/claude/.claude
       PROFILES_DIR: /home/claude/.claude-profiles
+      BROWSE_ROOT: /projects
       DEBUG: ${DEBUG:-false}
     volumes:
       - ${HOME}/.claude-profiles:/home/claude/.claude-profiles:ro
       - ${HOME}/.claude:/home/claude/.claude:ro
       - ${REPOS_PATH:-$HOME/repos}:/repos:ro
+      - ${PROJECTS_PATH:-$HOME}:/projects:ro
     ports:
       - "8001:8000"
     healthcheck:

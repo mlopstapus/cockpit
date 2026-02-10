@@ -33,10 +33,14 @@ async def list_repos(request: Request):
 
 
 @repos_router.get("/browse")
-async def browse_directories(path: str = "~"):
-    """Browse directories on the host machine for folder selection."""
+async def browse_directories(path: str | None = None):
+    """Browse directories on the host machine for folder selection.
+
+    Defaults to the configured browse_root (typically /repos in Docker).
+    """
+    browse_path = path or settings.browse_root
     try:
-        target = Path(path).expanduser().resolve()
+        target = Path(browse_path).expanduser().resolve()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
 

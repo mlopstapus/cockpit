@@ -54,7 +54,7 @@ export default function NewProjectModal({
 
   const handleOpenBrowser = () => {
     setShowBrowser(true);
-    browse("~");
+    browse(); // Uses backend default (browse_root, typically /repos)
   };
 
   const handleSelectFolder = (path: string) => {
