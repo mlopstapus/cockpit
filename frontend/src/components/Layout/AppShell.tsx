@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
-import BottomNav from "./BottomNav";
-import StatusBar from "./StatusBar";
+import Sidebar from "./Sidebar";
+import Header from "./Header";
 
 interface AppShellProps {
   children: ReactNode;
@@ -8,17 +8,15 @@ interface AppShellProps {
 
 export default function AppShell({ children }: AppShellProps) {
   return (
-    <div className="flex h-screen flex-col bg-base text-white">
-      {/* Status bar with account info */}
-      <StatusBar />
+    <div className="flex h-screen bg-base text-white">
+      {/* Sidebar — persistent on desktop, slide-out on mobile */}
+      <Sidebar />
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto pb-20">
-        {children}
-      </main>
-
-      {/* Bottom navigation - iOS style */}
-      <BottomNav />
+      {/* Main content area */}
+      <div className="flex flex-1 flex-col min-w-0">
+        <Header />
+        <main className="flex-1 overflow-y-auto">{children}</main>
+      </div>
     </div>
   );
 }

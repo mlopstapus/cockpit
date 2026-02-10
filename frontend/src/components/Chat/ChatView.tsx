@@ -10,10 +10,10 @@ import MessageBubble from "./MessageBubble";
 export default function ChatView() {
   const selectedSessionId = useCockpit((s) => s.selectedSessionId);
   const sessions = useCockpit((s) => s.sessions);
-  const setActiveTab = useCockpit((s) => s.setActiveTab);
+  const setCurrentView = useCockpit((s) => s.setCurrentView);
   const setSelectedSessionId = useCockpit((s) => s.setSelectedSessionId);
 
-  const { messages, outputBuffer, isConnected, sendMessage } =
+  const { messages, outputBuffer, isConnected } =
     useSessionWebSocket(selectedSessionId);
 
   const { sendNotification, hasPermission } = useNotifications();
@@ -59,7 +59,7 @@ export default function ChatView() {
 
   const handleBack = () => {
     setSelectedSessionId(null);
-    setActiveTab("sessions");
+    setCurrentView("sessions");
   };
 
   return (
@@ -132,7 +132,6 @@ export default function ChatView() {
       {selectedSessionId && (
         <InputBar
           sessionId={selectedSessionId}
-          onSendMessage={sendMessage}
           isConnected={isConnected}
         />
       )}

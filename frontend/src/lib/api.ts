@@ -3,12 +3,12 @@ import type {
   SessionInfo,
   RepoInfo,
   AccountInfo,
+  ProjectInfo,
   CreateSessionRequest,
+  CreateProjectRequest,
   SendMessageRequest,
 } from "../types";
 
-// In production, this will be the same origin (served by Caddy)
-// In dev, point to the NUC's FastAPI server
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || "";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -54,8 +54,41 @@ export const api = {
       method: "DELETE",
     }),
 
+  // Projects
+  listProjects: () => request<ProjectInfo[]>("/api/projects"),
+
+  createProject: (body: CreateProjectRequest) =>
+    request<ProjectInfo>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getProject: (id: string) => request<ProjectInfo>(`/api/projects/${id}`),
+
+  updateProject: (id: string, body: Partial<CreateProjectRequest>) =>
+    request<ProjectInfo>(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteProject: (id: string) =>
+    request<{ status: string }>(`/api/projects/${id}`, {
+      method: "DELETE",
+    }),
+
+  getProjectSessions: (id: string) =>
+    request<SessionInfo[]>(`/api/projects/${id}/sessions`),
+
   // Repos
   listRepos: () => request<RepoInfo[]>("/api/repos"),
+
+  browseDirectories: (path?: string) =>
+    request<{
+      current: string;
+      parent: string | null;
+      is_git_repo: boolean;
+      directories: Array<{ name: string; path: string; is_git_repo: boolean }>;
+    }>(`/api/repos/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 
   // Accounts
   listAccounts: () => request<AccountInfo[]>("/api/accounts"),
@@ -65,7 +98,6 @@ export const api = {
       method: "POST",
     }),
 
-  // Account Authentication
   getAuthStatus: (id: string) =>
     request<{ account_id: string; status: string; needs_reauth: boolean }>(
       `/api/accounts/${id}/auth-status`

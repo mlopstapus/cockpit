@@ -87,3 +87,23 @@ export interface SessionTemplate {
   color?: string;
   createdAt: string;
 }
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  description: string;
+  repo_path: string;
+  color: string;
+  icon: string;
+  created_at: string;
+  updated_at: string;
+  session_count: number;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+  repo_path: string;
+  color?: string;
+  icon?: string;
+}

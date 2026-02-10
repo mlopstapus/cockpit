@@ -55,8 +55,7 @@ interface QuickCommandsProps {
 
 export default function QuickCommandsBar({ repoName }: QuickCommandsProps) {
   const setSessions = useCockpit((s) => s.setSessions);
-  const setSelectedSessionId = useCockpit((s) => s.setSelectedSessionId);
-  const setActiveTab = useCockpit((s) => s.setActiveTab);
+  const navigateToSession = useCockpit((s) => s.navigateToSession);
   const sessions = useCockpit((s) => s.sessions);
 
   const [executing, setExecuting] = useState<string | null>(null);
@@ -82,8 +81,7 @@ export default function QuickCommandsBar({ repoName }: QuickCommandsProps) {
       await api.sendMessage(newSession.id, command.command);
 
       setSessions([...sessions, newSession]);
-      setSelectedSessionId(newSession.id);
-      setActiveTab("chat");
+      navigateToSession(newSession.id);
     } catch (err) {
       console.error("Failed to execute quick command:", err);
       alert("Failed to execute command");

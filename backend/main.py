@@ -15,6 +15,7 @@ from services.auth_process import AuthProcess
 from ws.hub import WebSocketHub
 from routers.sessions import router as sessions_router
 from routers.repos import repos_router, accounts_router
+from routers.projects import router as projects_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
     app.state.account_rotator = account_rotator
     app.state.session_manager = session_manager
     app.state.ws_hub = ws_hub
+    app.state.projects = {}  # In-memory project store (DB migration later)
 
     logger.info("🚀 Claude Cockpit started")
     logger.info(f"   Repos: {[r.name for r in settings.repos]}")
@@ -71,6 +73,7 @@ app.add_middleware(
 app.include_router(sessions_router)
 app.include_router(repos_router)
 app.include_router(accounts_router)
+app.include_router(projects_router)
 
 
 # WebSocket endpoint for session streaming

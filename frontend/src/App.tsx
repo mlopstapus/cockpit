@@ -6,27 +6,27 @@ import SessionDashboard from "./components/Sessions/SessionDashboard";
 import ChatView from "./components/Chat/ChatView";
 import AccountPanel from "./components/Accounts/AccountPanel";
 import SettingsView from "./components/Settings/SettingsView";
+import ProjectsView from "./components/Projects/ProjectsView";
+import WelcomeScreen from "./components/Chat/WelcomeScreen";
 import InstallPrompt from "./components/PWA/InstallPrompt";
 import { useInstallPrompt } from "./hooks/useInstallPrompt";
 
 export default function App() {
-  const activeTab = useCockpit((s) => s.activeTab);
+  const currentView = useCockpit((s) => s.currentView);
+  const selectedSessionId = useCockpit((s) => s.selectedSessionId);
   const setIsLoading = useCockpit((s) => s.setIsLoading);
   const setSessions = useCockpit((s) => s.setSessions);
   const setAccounts = useCockpit((s) => s.setAccounts);
+  const setProjects = useCockpit((s) => s.setProjects);
   const setError = useCockpit((s) => s.setError);
 
   const { canInstall, isInstalled, prompt, dismissPrompt } = useInstallPrompt();
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
-  // Show install prompt after a short delay on first visit (if not installed)
   useEffect(() => {
-    if (!canInstall || isInstalled) {
-      return;
-    }
+    if (!canInstall || isInstalled) return;
 
     const timer = setTimeout(() => {
-      // Check if user has dismissed before
       const hasDismissed = localStorage.getItem("cockpit-install-dismissed");
       if (!hasDismissed) {
         setShowInstallPrompt(true);
@@ -47,7 +47,7 @@ export default function App() {
     dismissPrompt();
   };
 
-  // Initial load: fetch sessions and accounts
+  // Initial load: fetch sessions, accounts, and projects
   useEffect(() => {
     const loadInitialData = async () => {
       setIsLoading(true);
@@ -58,6 +58,14 @@ export default function App() {
         ]);
         setSessions(sessions);
         setAccounts(accounts);
+
+        // Projects endpoint may not exist yet — fail gracefully
+        try {
+          const projects = await api.listProjects();
+          setProjects(projects);
+        } catch {
+          // Projects API not available yet
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -71,10 +79,26 @@ export default function App() {
 
     loadInitialData();
 
-    // Periodically refresh sessions and accounts
     const interval = setInterval(loadInitialData, 5000);
     return () => clearInterval(interval);
-  }, [setIsLoading, setSessions, setAccounts, setError]);
+  }, [setIsLoading, setSessions, setAccounts, setProjects, setError]);
+
+  const renderView = () => {
+    switch (currentView) {
+      case "sessions":
+        return <SessionDashboard />;
+      case "chat":
+        return selectedSessionId ? <ChatView /> : <WelcomeScreen />;
+      case "accounts":
+        return <AccountPanel />;
+      case "settings":
+        return <SettingsView />;
+      case "projects":
+        return <ProjectsView />;
+      default:
+        return <SessionDashboard />;
+    }
+  };
 
   return (
     <AppShell>
@@ -83,10 +107,7 @@ export default function App() {
           <InstallPrompt onInstall={handleInstall} onDismiss={handleDismiss} />
         </div>
       )}
-      {activeTab === "sessions" && <SessionDashboard />}
-      {activeTab === "chat" && <ChatView />}
-      {activeTab === "accounts" && <AccountPanel />}
-      {activeTab === "settings" && <SettingsView />}
+      {renderView()}
     </AppShell>
   );
 }

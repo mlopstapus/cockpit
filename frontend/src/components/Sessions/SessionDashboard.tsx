@@ -10,8 +10,7 @@ import SessionTemplatesPanel from "./SessionTemplatesPanel";
 export default function SessionDashboard() {
   const sessions = useCockpit((s) => s.sessions);
   const setSessions = useCockpit((s) => s.setSessions);
-  const setSelectedSessionId = useCockpit((s) => s.setSelectedSessionId);
-  const setActiveTab = useCockpit((s) => s.setActiveTab);
+  const navigateToSession = useCockpit((s) => s.navigateToSession);
 
   const [isLoading, setIsLoading] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -65,8 +64,7 @@ export default function SessionDashboard() {
   };
 
   const handleSessionClick = (sessionId: string) => {
-    setSelectedSessionId(sessionId);
-    setActiveTab("chat");
+    navigateToSession(sessionId);
   };
 
   return (
@@ -115,7 +113,7 @@ export default function SessionDashboard() {
       )}
 
       {/* Floating Action Button */}
-      <div className="fixed bottom-24 right-4 flex gap-2">
+      <div className="fixed bottom-6 right-4 flex gap-2 pb-safe">
         <button
           onClick={() => setShowTemplates(!showTemplates)}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-700 text-base shadow-lg transition hover:bg-gray-600 active:scale-95"

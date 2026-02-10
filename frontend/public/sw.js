@@ -1,23 +1,17 @@
-/// <reference lib="webworker" />
+/* Claude Cockpit — Service Worker */
 
 const CACHE_VERSION = "v1";
-const ASSETS_CACHE = `cockpit-assets-${CACHE_VERSION}`;
-const API_CACHE = `cockpit-api-${CACHE_VERSION}`;
-const RUNTIME_CACHE = `cockpit-runtime-${CACHE_VERSION}`;
+const ASSETS_CACHE = "cockpit-assets-" + CACHE_VERSION;
+const API_CACHE = "cockpit-api-" + CACHE_VERSION;
+const RUNTIME_CACHE = "cockpit-runtime-" + CACHE_VERSION;
 
-const urlsToCache = [
-  "/",
-  "/index.html",
-  "/manifest.json",
-];
+const urlsToCache = ["/", "/index.html", "/manifest.json"];
 
-declare const self: ServiceWorkerGlobalScope;
-
-// Install event - cache assets
-self.addEventListener("install", (event: ExtendableEvent) => {
+// Install event — cache core assets
+self.addEventListener("install", function (event) {
   console.log("[SW] Installing service worker...");
   event.waitUntil(
-    caches.open(ASSETS_CACHE).then((cache) => {
+    caches.open(ASSETS_CACHE).then(function (cache) {
       console.log("[SW] Caching core assets");
       return cache.addAll(urlsToCache);
     })
@@ -25,53 +19,55 @@ self.addEventListener("install", (event: ExtendableEvent) => {
   self.skipWaiting();
 });
 
-// Activate event - cleanup old caches
-self.addEventListener("activate", (event: ExtendableEvent) => {
+// Activate event — cleanup old caches
+self.addEventListener("activate", function (event) {
   console.log("[SW] Activating service worker...");
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
+    caches.keys().then(function (cacheNames) {
       return Promise.all(
-        cacheNames.map((cacheName) => {
-          // Delete old versions of our caches
-          if (
-            (cacheName.startsWith("cockpit-") && !cacheName.includes(CACHE_VERSION)) ||
-            cacheName === "cockpit-v0"
-          ) {
+        cacheNames
+          .filter(function (cacheName) {
+            return (
+              (cacheName.startsWith("cockpit-") &&
+                !cacheName.includes(CACHE_VERSION)) ||
+              cacheName === "cockpit-v0"
+            );
+          })
+          .map(function (cacheName) {
             console.log("[SW] Deleting old cache:", cacheName);
             return caches.delete(cacheName);
-          }
-        })
+          })
       );
     })
   );
   self.clients.claim();
 });
 
-// Fetch event - intelligent caching strategy
-self.addEventListener("fetch", (event: FetchEvent) => {
-  const { request } = event;
-  const url = new URL(request.url);
+// Fetch event — intelligent caching strategy
+self.addEventListener("fetch", function (event) {
+  var request = event.request;
+  var url = new URL(request.url);
 
   // Don't cache WebSocket connections or non-HTTP requests
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return;
   }
 
-  // API endpoints - network first, fallback to cache or offline page
+  // API endpoints — network first, fallback to cache
   if (url.pathname.startsWith("/api/")) {
-    return event.respondWith(
+    event.respondWith(
       fetch(request)
-        .then((response) => {
-          // Cache successful API responses
+        .then(function (response) {
           if (response.ok && request.method === "GET") {
-            const cache = caches.open(API_CACHE);
-            cache.then((c) => c.put(request, response.clone()));
+            var responseClone = response.clone();
+            caches.open(API_CACHE).then(function (cache) {
+              cache.put(request, responseClone);
+            });
           }
           return response;
         })
-        .catch(() => {
-          // Return cached response if available
-          return caches.match(request).then((cached) => {
+        .catch(function () {
+          return caches.match(request).then(function (cached) {
             return (
               cached ||
               new Response("API unavailable offline", { status: 503 })
@@ -79,29 +75,31 @@ self.addEventListener("fetch", (event: FetchEvent) => {
           });
         })
     );
+    return;
   }
 
-  // Static assets - cache first, network fallback
+  // Static assets — cache first, network fallback
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.match(request).then(function (cached) {
       return (
         cached ||
         fetch(request)
-          .then((response) => {
-            // Cache successful responses for static assets
+          .then(function (response) {
             if (response.ok && request.method === "GET") {
-              const cache = caches.open(RUNTIME_CACHE);
-              cache.then((c) => c.put(request, response.clone()));
+              var responseClone = response.clone();
+              caches.open(RUNTIME_CACHE).then(function (cache) {
+                cache.put(request, responseClone);
+              });
             }
             return response;
           })
-          .catch(() => {
-            // Offline fallback - return index.html for navigation requests
+          .catch(function () {
             if (request.mode === "navigate") {
               return caches.match("/index.html");
             }
-            // For other requests, return a generic offline response
-            return new Response("Resource unavailable offline", { status: 503 });
+            return new Response("Resource unavailable offline", {
+              status: 503,
+            });
           })
       );
     })
@@ -109,13 +107,13 @@ self.addEventListener("fetch", (event: FetchEvent) => {
 });
 
 // Handle messages from client
-self.addEventListener("message", (event: ExtendableMessageEvent) => {
+self.addEventListener("message", function (event) {
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
 
   if (event.data && event.data.type === "SHOW_NOTIFICATION") {
-    const options = event.data.options;
+    var options = event.data.options;
     self.registration.showNotification(options.title, {
       body: options.body,
       icon: options.icon || "/icon-192.png",
@@ -128,26 +126,21 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 });
 
 // Handle notification clicks
-self.addEventListener("notificationclick", (event: NotificationEvent) => {
+self.addEventListener("notificationclick", function (event) {
   event.notification.close();
-
-  // Focus or open client window
   event.waitUntil(
-    clients.matchAll({ type: "window" }).then((clientList) => {
-      // Check if there's already a window/tab with the target URL open
-      for (let i = 0; i < clientList.length; i++) {
-        const client = clientList[i];
-        if ((client as any).url === "/" && "focus" in client) {
-          return (client as any).focus();
+    self.clients.matchAll({ type: "window" }).then(function (clientList) {
+      for (var i = 0; i < clientList.length; i++) {
+        var client = clientList[i];
+        if (client.url === "/" && "focus" in client) {
+          return client.focus();
         }
       }
-      // If not, open a new window/tab with the target URL
-      if (clients.openWindow) {
-        return clients.openWindow("/");
+      if (self.clients.openWindow) {
+        return self.clients.openWindow("/");
       }
     })
   );
 });
 
 console.log("[SW] Service worker loaded");
-

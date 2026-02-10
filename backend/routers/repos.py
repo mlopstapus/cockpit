@@ -32,6 +32,47 @@ async def list_repos(request: Request):
     return repos
 
 
+@repos_router.get("/browse")
+async def browse_directories(path: str | None = None):
+    """Browse directories on the host machine for folder selection.
+
+    Defaults to the configured browse_root (typically /repos in Docker).
+    """
+    browse_path = path or settings.browse_root
+    try:
+        target = Path(browse_path).expanduser().resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    # Check if this looks like a git repo
+    is_git_repo = (target / ".git").exists()
+
+    # List subdirectories (skip hidden dirs)
+    subdirs = []
+    try:
+        for entry in sorted(target.iterdir()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                subdirs.append({
+                    "name": entry.name,
+                    "path": str(entry),
+                    "is_git_repo": (entry / ".git").exists(),
+                })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    return {
+        "current": str(target),
+        "parent": str(target.parent) if target != target.parent else None,
+        "is_git_repo": is_git_repo,
+        "directories": subdirs,
+    }
+
+
 @accounts_router.get("", response_model=list[dict])
 async def list_accounts(request: Request):
     """List all accounts with usage stats."""
