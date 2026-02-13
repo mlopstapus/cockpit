@@ -36,9 +36,9 @@ services:
       BROWSE_ROOT: ${BROWSE_ROOT:-/repos}
       DEBUG: ${DEBUG:-false}
     volumes:
-      - ${HOME}/.claude-profiles:/home/claude/.claude-profiles:ro
-      - ${HOME}/.claude:/home/claude/.claude:ro
-      - ${HOME}/repos:/repos:ro
+      - ${HOME_DIR}/.claude-profiles:/home/claude/.claude-profiles:ro
+      - ${HOME_DIR}/.claude:/home/claude/.claude:ro
+      - ${HOME_DIR}/repos:/repos:ro
     ports:
       - "8001:8000"
 
