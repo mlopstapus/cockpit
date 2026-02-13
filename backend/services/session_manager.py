@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from config import settings, RepoConfig
+from config import settings
 from models import SessionStatus, SessionInfo
 from services.claude_process import ClaudeProcess
 from services.account_rotator import AccountRotator
@@ -18,19 +18,14 @@ class SessionManager:
         self.sessions: dict[str, dict] = {}  # session_id -> session info + process
         self.account_rotator = account_rotator
 
-    def _get_repo_config(self, repo_name: str) -> RepoConfig:
-        for repo in settings.repos:
-            if repo.name == repo_name:
-                return repo
-        raise ValueError(f"Unknown repo: {repo_name}")
-
     async def create_session(
         self,
-        repo_name: str,
+        project_id: str,
+        project: dict,
         name: str | None = None,
         account_id: str | None = None,
     ) -> SessionInfo:
-        """Create and start a new Claude Code session."""
+        """Create and start a new Claude Code session for a project."""
         # Check concurrent session limit
         active = sum(1 for s in self.sessions.values() if s["status"] == SessionStatus.RUNNING)
         if active >= settings.max_concurrent_sessions:
@@ -38,7 +33,8 @@ class SessionManager:
                 f"Max concurrent sessions ({settings.max_concurrent_sessions}) reached"
             )
 
-        repo = self._get_repo_config(repo_name)
+        repo_path = project["repo_path"]
+        project_name = project["name"]
 
         # Pick account
         if account_id:
@@ -47,11 +43,11 @@ class SessionManager:
             account = self.account_rotator.get_best_account()
 
         session_id = str(uuid.uuid4())[:8]
-        session_name = name or f"{repo.name}-{session_id}"
+        session_name = name or f"{project_name}-{session_id}"
 
         # Create Claude process
         process = ClaudeProcess(
-            repo_path=repo.path,
+            repo_path=repo_path,
             config_dir=account.config_dir,
             session_id=session_id,
         )
@@ -61,8 +57,9 @@ class SessionManager:
         self.sessions[session_id] = {
             "id": session_id,
             "name": session_name,
-            "repo_name": repo.name,
-            "repo_path": repo.path,
+            "project_id": project_id,
+            "project_name": project_name,
+            "repo_path": repo_path,
             "account_id": account.id,
             "status": SessionStatus.STARTING,
             "process": process,
@@ -175,7 +172,8 @@ class SessionManager:
         return SessionInfo(
             id=s["id"],
             name=s["name"],
-            repo_name=s["repo_name"],
+            project_id=s["project_id"],
+            project_name=s["project_name"],
             repo_path=s["repo_path"],
             account_id=s["account_id"],
             status=s["status"],

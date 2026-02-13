@@ -37,7 +37,8 @@ export interface AccountInfo {
 export interface SessionInfo {
   id: string;
   name: string;
-  repo_name: string;
+  project_id: string;
+  project_name: string;
   repo_path: string;
   account_id: string;
   status: SessionStatus;
@@ -69,7 +70,7 @@ export interface WSMessage {
 }
 
 export interface CreateSessionRequest {
-  repo_name: string;
+  project_id: string;
   name?: string;
   account_id?: string;
 }
@@ -81,7 +82,8 @@ export interface SendMessageRequest {
 export interface SessionTemplate {
   id: string;
   name: string;
-  repo_name: string;
+  project_id: string;
+  project_name: string;
   account_id?: string;
   description?: string;
   color?: string;

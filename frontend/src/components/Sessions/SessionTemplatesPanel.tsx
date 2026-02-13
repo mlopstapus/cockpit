@@ -14,23 +14,30 @@ export default function SessionTemplatesPanel() {
 
   const [showForm, setShowForm] = useState(false);
   const [templateName, setTemplateName] = useState("");
-  const [selectedRepo, setSelectedRepo] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedAccount, setSelectedAccount] = useState("");
   const [description, setDescription] = useState("");
 
-  const repos = [...new Set(sessions.map((s) => s.repo_name))];
+  const projects = [...new Set(sessions.map((s) => ({ id: s.project_id, name: s.project_name })))];
   const accounts = useCockpit((s) => s.accounts);
 
   const handleCreateTemplate = () => {
-    if (!templateName || !selectedRepo) {
-      alert("Please fill in name and select a repository");
+    if (!templateName || !selectedProjectId) {
+      alert("Please fill in name and select a project");
+      return;
+    }
+
+    const project = projects.find((p) => p.id === selectedProjectId);
+    if (!project) {
+      alert("Project not found");
       return;
     }
 
     const newTemplate = {
       id: `template-${Date.now()}`,
       name: templateName,
-      repo_name: selectedRepo,
+      project_id: selectedProjectId,
+      project_name: project.name,
       account_id: selectedAccount || undefined,
       description: description || undefined,
       color: undefined,
@@ -39,7 +46,7 @@ export default function SessionTemplatesPanel() {
 
     addTemplate(newTemplate);
     setTemplateName("");
-    setSelectedRepo("");
+    setSelectedProjectId("");
     setSelectedAccount("");
     setDescription("");
     setShowForm(false);
@@ -48,7 +55,7 @@ export default function SessionTemplatesPanel() {
   const handleUseTemplate = async (template: SessionTemplate) => {
     try {
       const newSession = await api.createSession({
-        repo_name: template.repo_name,
+        project_id: template.project_id,
         account_id: template.account_id,
         name: `From: ${template.name}`,
       });
@@ -90,14 +97,14 @@ export default function SessionTemplatesPanel() {
             className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white placeholder-gray-500 focus:border-accent focus:outline-none resize-none h-12"
           />
           <select
-            value={selectedRepo}
-            onChange={(e) => setSelectedRepo(e.target.value)}
+            value={selectedProjectId}
+            onChange={(e) => setSelectedProjectId(e.target.value)}
             className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-white focus:border-accent focus:outline-none"
           >
-            <option value="">Select repository...</option>
-            {repos.map((repo) => (
-              <option key={repo} value={repo}>
-                {repo}
+            <option value="">Select project...</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
               </option>
             ))}
           </select>
@@ -152,7 +159,7 @@ export default function SessionTemplatesPanel() {
                     </p>
                   )}
                   <p className="text-xs text-gray-500 mt-1">
-                    {template.repo_name}
+                    {template.project_name}
                     {template.account_id && ` • ${template.account_id}`}
                   </p>
                 </div>

@@ -13,8 +13,11 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the React app
-RUN npm run build
+# Build arg for API URL
+ARG VITE_API_URL=http://localhost:8001
+
+# Build the React app with API_URL
+RUN VITE_API_URL=$VITE_API_URL npm run build
 
 # Stage 2: Serve
 FROM node:20-alpine

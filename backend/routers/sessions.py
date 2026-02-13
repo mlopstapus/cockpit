@@ -28,9 +28,17 @@ async def list_sessions(request: Request):
 @router.post("", response_model=SessionInfo)
 async def create_session(request: Request, body: CreateSessionRequest):
     sm, ws_hub = get_deps(request)
+    projects = request.app.state.projects
+    
+    # Look up the project
+    project = projects.get(body.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
     try:
         session = await sm.create_session(
-            repo_name=body.repo_name,
+            project_id=body.project_id,
+            project=project,
             name=body.name,
             account_id=body.account_id,
         )

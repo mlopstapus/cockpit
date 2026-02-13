@@ -75,7 +75,7 @@ export default function ChatView() {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="truncate text-sm font-semibold">{session.name}</h1>
-            <p className="text-xs text-gray-400">{session.repo_name}</p>
+            <p className="text-xs text-gray-400">{session.project_name}</p>
           </div>
           <div className="flex items-center gap-1">
             {isConnected ? (

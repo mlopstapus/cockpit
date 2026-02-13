@@ -30,7 +30,7 @@ class AuthStatus(str, Enum):
 
 
 class CreateSessionRequest(BaseModel):
-    repo_name: str
+    project_id: str
     name: str | None = None  # Auto-generated if not provided
     account_id: str | None = None  # Auto-selected if not provided
 
@@ -74,7 +74,8 @@ class Message(BaseModel):
 class SessionInfo(BaseModel):
     id: str
     name: str
-    repo_name: str
+    project_id: str
+    project_name: str
     repo_path: str
     account_id: str
     status: SessionStatus

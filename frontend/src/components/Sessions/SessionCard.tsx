@@ -39,7 +39,7 @@ export default function SessionCard({
             <h3 className="truncate text-sm font-semibold">{session.name}</h3>
             <Circle size={8} className={`flex-shrink-0 ${status.color}`} />
           </div>
-          <p className="text-xs text-gray-400">{session.repo_name}</p>
+          <p className="text-xs text-gray-400">{session.project_name}</p>
           <p className="mt-2 text-xs text-gray-500 line-clamp-2">
             {timeAgo}
             {session.message_count > 0 && ` • ${session.message_count} messages`}

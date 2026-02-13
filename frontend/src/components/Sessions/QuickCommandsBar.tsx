@@ -50,10 +50,10 @@ const QUICK_COMMANDS: QuickCommand[] = [
 ];
 
 interface QuickCommandsProps {
-  repoName?: string;
+  projectId?: string;
 }
 
-export default function QuickCommandsBar({ repoName }: QuickCommandsProps) {
+export default function QuickCommandsBar({ projectId }: QuickCommandsProps) {
   const setSessions = useCockpit((s) => s.setSessions);
   const navigateToSession = useCockpit((s) => s.navigateToSession);
   const sessions = useCockpit((s) => s.sessions);
@@ -64,16 +64,16 @@ export default function QuickCommandsBar({ repoName }: QuickCommandsProps) {
     try {
       setExecuting(command.id);
 
-      // Get the current repo or use the provided one
-      const repo = repoName || sessions[0]?.repo_name;
-      if (!repo) {
-        alert("No repository selected");
+      // Get the current project or use the provided one
+      const currentProjectId = projectId || sessions[0]?.project_id;
+      if (!currentProjectId) {
+        alert("No project selected");
         return;
       }
 
       // Create a new session with the quick command
       const newSession = await api.createSession({
-        repo_name: repo,
+        project_id: currentProjectId,
         name: `Quick: ${command.label}`,
       });
 

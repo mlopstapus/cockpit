@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Loader } from "lucide-react";
 import { api } from "../../lib/api";
-import type { RepoInfo, SessionInfo } from "../../types";
+import type { ProjectInfo, SessionInfo } from "../../types";
 
 interface NewSessionModalProps {
   onClose: () => void;
@@ -12,34 +12,40 @@ export default function NewSessionModal({
   onClose,
   onSessionCreated,
 }: NewSessionModalProps) {
-  const [repos, setRepos] = useState<RepoInfo[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadRepos = async () => {
+    const loadProjects = async () => {
       try {
-        const data = await api.listRepos();
-        setRepos(data);
+        const data = await api.listProjects();
+        setProjects(data);
         if (data.length > 0) {
-          setSelectedRepo(data[0].name);
+          setSelectedProjectId(data[0].id);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load repos");
+        setError(err instanceof Error ? err.message : "Failed to load projects");
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadRepos();
+    loadProjects();
   }, []);
 
   const handleCreate = async () => {
-    if (!selectedRepo) {
-      setError("Please select a repository");
+    if (!selectedProjectId) {
+      setError("Please select a project");
+      return;
+    }
+
+    const project = projects.find((p) => p.id === selectedProjectId);
+    if (!project) {
+      setError("Project not found");
       return;
     }
 
@@ -48,8 +54,8 @@ export default function NewSessionModal({
 
     try {
       const session = await api.createSession({
-        repo_name: selectedRepo,
-        name: sessionName || selectedRepo,
+        project_id: selectedProjectId,
+        name: sessionName || `${project.name}-session`,
       });
       onSessionCreated(session);
     } catch (err) {
@@ -81,26 +87,36 @@ export default function NewSessionModal({
           <div className="flex justify-center py-8">
             <Loader size={24} className="animate-spin text-accent" />
           </div>
+        ) : projects.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-gray-400 mb-4">No projects yet</p>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-medium transition hover:bg-gray-800"
+            >
+              Create a Project First
+            </button>
+          </div>
         ) : (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                Repository
+                Project
               </label>
               <select
-                value={selectedRepo || ""}
-                onChange={(e) => setSelectedRepo(e.target.value)}
+                value={selectedProjectId || ""}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white focus:border-accent focus:outline-none"
               >
-                {repos.map((repo) => (
-                  <option key={repo.name} value={repo.name}>
-                    {repo.name}
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
                   </option>
                 ))}
               </select>
-              {repos.find((r) => r.name === selectedRepo)?.description && (
+              {projects.find((p) => p.id === selectedProjectId)?.description && (
                 <p className="mt-2 text-xs text-gray-400">
-                  {repos.find((r) => r.name === selectedRepo)?.description}
+                  {projects.find((p) => p.id === selectedProjectId)?.description}
                 </p>
               )}
             </div>
@@ -127,7 +143,7 @@ export default function NewSessionModal({
               </button>
               <button
                 onClick={handleCreate}
-                disabled={!selectedRepo || isCreating}
+                disabled={!selectedProjectId || isCreating}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-base transition disabled:opacity-50 hover:bg-blue-600"
               >
                 {isCreating && <Loader size={16} className="animate-spin" />}

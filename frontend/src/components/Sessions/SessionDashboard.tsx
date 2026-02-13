@@ -99,7 +99,7 @@ export default function SessionDashboard() {
         </div>
       ) : (
         <div className="space-y-0">
-          <QuickCommandsBar repoName={sessions[0]?.repo_name} />
+          <QuickCommandsBar projectId={sessions[0]?.project_id} />
           <div className="space-y-3 p-4">
             {sessions.map((session) => (
               <SessionCard

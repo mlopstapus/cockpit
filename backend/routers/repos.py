@@ -11,14 +11,8 @@ accounts_router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 @repos_router.get("", response_model=list[RepoInfo])
 async def list_repos(request: Request):
     """List all configured repos."""
-    sm = request.app.state.session_manager
     repos = []
     for repo in settings.repos:
-        # Count active sessions for this repo
-        active = sum(
-            1 for s in sm.sessions.values()
-            if s["repo_name"] == repo.name and s["status"].value in ("running", "idle")
-        )
         repos.append(
             RepoInfo(
                 name=repo.name,
@@ -26,7 +20,7 @@ async def list_repos(request: Request):
                 description=repo.description,
                 default_branch=repo.default_branch,
                 docker_compose=repo.docker_compose,
-                active_sessions=active,
+                active_sessions=0,
             )
         )
     return repos
