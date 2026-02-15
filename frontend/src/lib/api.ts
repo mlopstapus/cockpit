@@ -90,6 +90,16 @@ export const api = {
       directories: Array<{ name: string; path: string; is_git_repo: boolean }>;
     }>(`/api/repos/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
 
+  // Workspaces
+  discoverWorkspaces: () =>
+    request<Array<{
+      name: string;
+      path: string;
+      is_git_repo: boolean;
+      default_branch: string | null;
+      has_docker_compose: boolean;
+    }>>("/api/workspaces/discover"),
+
   // Accounts
   listAccounts: () => request<AccountInfo[]>("/api/accounts"),
 
