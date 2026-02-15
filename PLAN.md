@@ -1,142 +1,280 @@
-# Plan: UI Overhaul — Modern Sidebar Navigation + Task Scheduling
+# Plan: Cockpit MVP - Mobile Feature Submission
 
-**Status:** Planning
-**Created:** 2026-02-09
+**Status:** 📋 Planning
+**Created:** 2026-02-15
+**Architecture:** Simplified - Use `/new` skill workflow, not DAG execution
 
 ## Goal
 
-Replace the bottom-tab navigation with a responsive sidebar drawer (persistent on desktop, overlay on mobile) inspired by Claude and ChatGPT apps. Add project-based chat organization, task scheduling with cron, and a persistent notification inbox. Integrate the Cockpit logo throughout (favicon, PWA icons, sidebar, welcome screen).
+Build mobile-first UI to submit feature requests from iPhone and monitor Claude Code `/new` workflow execution remotely.
+
+**Core Insight:** Don't build a DAG execution engine. Just trigger the existing `/new` skill remotely and stream logs back to mobile.
 
 ---
 
-## Phase 1: Sidebar + Projects + Chat UI + Logo
+## Key Decisions
 
-Core navigation and organizational overhaul. Ship this first.
+### ✅ Do
+1. **Use `/new` workflow** - It already works (plan → implement → finish → PR)
+2. **Host-based agents** - Run Claude CLI on host, not in Docker (needs git/tools access)
+3. **Mobile-first nav** - Bottom tabs don't work on iPhone, use mobile-optimized patterns
+4. **Chicken logo** - New branding for all icons and assets
+5. **Simple queue** - One feature at a time (FIFO), no parallel execution for MVP
 
-### Task 1 — Process and integrate the Cockpit logo
-- Generate favicon (16x16, 32x32 ICO), Apple touch icon (180x180), PWA icons (192x192, 512x512, 512x512 maskable) from the source PNG
-- Update `frontend/public/manifest.json` with real icon paths
-- Update `frontend/index.html` with favicon and apple-touch-icon links
-- Add logo to sidebar header and welcome screen
-- Files: `frontend/public/` (icons), `frontend/public/manifest.json`, `frontend/index.html`
+### ❌ Don't
+1. **No DAG execution** - Too complex, `/new` already handles task ordering
+2. **No Docker agents** - Agents need host system access
+3. **No bottom navigation** - Poor iPhone UX
+4. **No complex orchestration** - Let `/new` skill handle it
 
-### Task 2 — Build responsive sidebar component
-- Create `Sidebar.tsx` — slide-out drawer on mobile (<768px), persistent panel on desktop (>=768px)
-- Hamburger menu button in header on mobile, always-visible on desktop
-- Swipe-from-left-edge to open on mobile (touch gesture)
-- Overlay backdrop on mobile when open
-- Sections: Logo/branding at top, navigation items, Settings + Profile pinned at bottom
-- Files: `frontend/src/components/Layout/Sidebar.tsx`, `frontend/src/components/Layout/SidebarHeader.tsx`
+---
 
-### Task 3 — Remove bottom tab bar, update AppShell layout
-- Remove `BottomNav.tsx` (replaced by sidebar)
-- Update `AppShell.tsx` to use sidebar + main content area layout
-- Add top header bar with hamburger toggle (mobile) and page title
-- Update Zustand store: replace `TabName` with richer navigation state (current view, selected project, selected session)
-- Files: `frontend/src/components/Layout/AppShell.tsx`, `frontend/src/components/Layout/BottomNav.tsx` (delete), `frontend/src/components/Layout/Header.tsx` (new), `frontend/src/lib/store.ts`
+## Phase 0: MVP (All Tasks)
 
-### Task 4 — Add Projects backend (DB model + API endpoints)
-- Create `projects` DB table: id, name, description, repo_path, color, icon, created_at, updated_at
-- Link sessions to projects: add `project_id` foreign key to sessions
-- API endpoints:
+### Task 1 — Chicken Logo Format Generation
+- **Source:** `frontend/public/chicken-logo.png` (orange chicken illustration)
+- **Generate all required formats:**
+  - **Favicon:**
+    - 16x16 PNG → `favicon-16.png`
+    - 32x32 PNG → `favicon-32.png`
+    - Combine into `favicon.ico` (multi-resolution ICO file)
+  - **Apple Touch Icon:**
+    - 180x180 PNG → `apple-touch-icon.png` (rounded corners, solid background)
+  - **PWA Icons:**
+    - 192x192 PNG → `icon-192.png` (standard)
+    - 512x512 PNG → `icon-512.png` (standard)
+    - 192x192 PNG → `icon-192-maskable.png` (with safe zone padding)
+    - 512x512 PNG → `icon-512-maskable.png` (with safe zone padding)
+- **Tools:** Use ImageMagick or Python (Pillow) to resize and convert:
+  ```bash
+  # Example with ImageMagick
+  convert chicken-logo.png -resize 16x16 favicon-16.png
+  convert chicken-logo.png -resize 32x32 favicon-32.png
+  convert favicon-16.png favicon-32.png favicon.ico
+  convert chicken-logo.png -resize 180x180 apple-touch-icon.png
+  # etc.
+  ```
+- **Maskable icons:** Add 20% padding (safe zone) to prevent cropping on Android
+- Update `frontend/public/manifest.json` with new icon paths and purpose ("any" vs "maskable")
+- Update `frontend/index.html` with `<link>` tags for favicon and apple-touch-icon
+- Add chicken logo to UI components (welcome screen, header/nav branding)
+- Files: `frontend/public/` (all icon files), `frontend/public/manifest.json`, `frontend/index.html`, `frontend/src/components/Welcome/WelcomeScreen.tsx`
+
+### Task 2 — Mobile-Friendly Navigation
+- **Problem:** Bottom nav has poor iPhone UX (home indicator conflicts, thumb zones)
+- **Solution:** Replace with mobile-optimized navigation
+  - Option A: Hamburger menu + slide-out drawer
+  - Option B: Top tabs with swipe gestures
+  - Option C: Floating action button + minimal top bar
+- Remove `BottomNav.tsx` component
+- Create new nav component optimized for mobile (preferably hamburger + drawer for MVP)
+- Test on iPhone Safari: tap targets, scrolling, gestures
+- Files: `frontend/src/components/Layout/BottomNav.tsx` (delete), `frontend/src/components/Layout/MobileNav.tsx` (new), `frontend/src/components/Layout/AppShell.tsx`
+
+### Task 3 — Dynamic Workspace Discovery (Replace Hardcoded Repos)
+- **Problem:** Repos currently hardcoded in `backend/config.py` (opero, laddr, smartr)
+- **Solution:** Dynamically discover projects from host directory
+- **Implementation:**
+  - Remove hardcoded `repos` list from `backend/config.py`
+  - Add `repos_root` setting (default: `~/repos` or configurable via env var)
+  - Create `/api/workspaces/discover` endpoint:
+    - Scan `repos_root` directory on host
+    - For each subdirectory, check if it's a git repo (`git rev-parse --git-dir`)
+    - Return list of discovered repos with metadata:
+      - `name`: directory name
+      - `path`: full path
+      - `is_git_repo`: boolean
+      - `default_branch`: detect from `git symbolic-ref refs/remotes/origin/HEAD` or fallback to "main"
+      - `has_docker_compose`: check for `docker-compose.yml`
+  - Update `/api/projects` POST endpoint to accept `repo_path` from discovery results
+  - Frontend: Add "Browse Workspaces" button → shows discovered repos → user selects one to create project
+- **Host-based execution:** Since agents run on host (not Docker), use direct filesystem access
+- **Migration:** On startup, if `projects` table is empty and old hardcoded repos exist in config, auto-create projects from them (one-time migration)
+- Files: `backend/config.py` (remove hardcoded repos), `backend/routers/workspaces.py` (new), `backend/services/workspace_discovery.py` (new), `frontend/src/components/Workspaces/WorkspaceBrowser.tsx` (new)
+
+### Task 4 — Database Schema
+- Create `projects` table:
+  - Columns: `id`, `name`, `description`, `repo_path`, `color`, `created_at`, `updated_at`
+- Create `sessions` table:
+  - Columns: `id`, `project_id` (FK), `feature_description`, `status` (`queued`, `running`, `completed`, `failed`), `created_at`, `started_at`, `completed_at`, `logs_path`, `pr_url`
+- Migration scripts for PostgreSQL
+- Files: `backend/db/migrations/`, `backend/models.py`
+
+### Task 5 — Projects API
+- CRUD endpoints for projects:
   - `GET /api/projects` — list all projects
   - `POST /api/projects` — create project (name, description, repo_path, color)
-  - `GET /api/projects/{id}` — project details with sessions
+  - `GET /api/projects/{id}` — get project details
   - `PUT /api/projects/{id}` — update project
   - `DELETE /api/projects/{id}` — delete project
-  - `GET /api/projects/{id}/sessions` — list sessions for project
-- Update `POST /api/sessions` to accept optional `project_id`
-- Files: `backend/models.py`, `backend/routers/projects.py` (new), `backend/routers/sessions.py`, `backend/db/` (migration)
+- Files: `backend/routers/projects.py` (new), `backend/main.py`
 
-### Task 5 — Add Projects to sidebar + frontend types
-- Add `ProjectInfo` type to `frontend/src/types/index.ts`
-- Add project API calls to `frontend/src/lib/api.ts`
-- Sidebar shows: list of projects (with colored icons), "New project" button, standalone chats section below
-- Tapping a project opens its session list in the main content area
-- Files: `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`, `frontend/src/components/Layout/Sidebar.tsx`, `frontend/src/components/Projects/ProjectList.tsx` (new), `frontend/src/components/Projects/NewProjectModal.tsx` (new)
+### Task 6 — Sessions API
+- Endpoints for session management:
+  - `POST /api/sessions` — create session (project_id, feature_description) → adds to queue
+  - `GET /api/sessions` — list all sessions (with filters: project_id, status)
+  - `GET /api/sessions/{id}` — get session details
+  - `POST /api/sessions/{id}/stop` — stop running session
+  - `POST /api/sessions/{id}/restart` — restart failed session
+- Files: `backend/routers/sessions.py` (new), `backend/main.py`
 
-### Task 6 — Redesign main chat view with welcome screen
-- Empty state: centered Cockpit logo + "How can I help you?" text + input bar (like Claude app screenshot)
-- Agent/account selector dropdown in header (like Claude's "Opus 4.6" picker)
-- Clean up chat view layout for sidebar-based navigation (no back button needed on desktop, keep on mobile)
-- Files: `frontend/src/components/Chat/WelcomeScreen.tsx` (new), `frontend/src/components/Chat/ChatView.tsx`, `frontend/src/components/Chat/AgentSelector.tsx` (new)
+### Task 7 — Host-Based Agent Execution
+- **Critical:** Agents must run on host machine (not Docker) to access git, npm, pytest, etc.
+- Implement PTY-based execution:
+  - Spawn Claude CLI on host: `claude code --new "<feature_description>"`
+  - Run in project's repo directory (from `projects.repo_path`)
+  - Capture stdout/stderr, write to log file
+  - Update session status: `queued` → `running` → `completed`/`failed`
+- Handle PTY lifecycle: spawn, monitor, cleanup on crash
+- Files: `backend/services/agent_executor.py` (new), `backend/services/pty_manager.py` (new)
 
-### Task 7 — Add Settings and Profile to sidebar bottom
-- Settings icon + label pinned to bottom of sidebar (above safe area)
-- Profile section: show current account name/avatar, quick account switcher
-- Settings page: relocate existing SettingsView content + add agent list with utilization meters (move from AccountPanel)
-- Files: `frontend/src/components/Settings/SettingsView.tsx`, `frontend/src/components/Layout/Sidebar.tsx`, `frontend/src/components/Settings/ProfileSection.tsx` (new), `frontend/src/components/Settings/AgentList.tsx` (new)
+### Task 8 — Simple Queue Worker
+- Background worker that:
+  - Polls `sessions` table for `status = 'queued'`
+  - Executes one session at a time (FIFO)
+  - Calls agent executor (Task 6)
+  - Updates session status on completion/failure
+- No parallel execution for MVP (add later if needed)
+- Files: `backend/services/queue_worker.py` (new), `backend/main.py` (lifespan startup)
 
-### Task 8 — Fix existing bugs and cleanup
-- Fix service worker TypeScript syntax (rewrite `sw.js` as valid JS)
-- Remove compiled `.js` files alongside `.tsx` source files (add to `.gitignore`)
-- Fix dual message send in `InputBar.tsx` (pick one: REST or WS)
-- Add Vite `resolve.alias` for `@/` path alias
-- Remove unused deps or wire them up (`@tanstack/react-query`, `clsx`, `tailwind-merge`)
-- Install `tailwindcss-animate` for animation classes actually used
-- Files: `frontend/public/sw.js`, `frontend/src/components/Chat/InputBar.tsx`, `frontend/vite.config.ts`, `frontend/package.json`, `frontend/.gitignore`
+### Task 9 — WebSocket Log Streaming
+- WebSocket endpoint: `ws://backend/api/sessions/{id}/logs`
+- Stream agent stdout/stderr in real-time to connected clients
+- Broadcast to all clients subscribed to a session
+- Implement WebSocket hub/manager
+- Files: `backend/ws/log_streamer.py` (new), `backend/ws/hub.py` (new), `backend/main.py`
 
----
+### Task 10 — Frontend: Projects UI with Workspace Browser
+- Project list view: shows all projects with colored tags
+- Create project form with workspace browser:
+  - "Browse Workspaces" button → calls `/api/workspaces/discover`
+  - Shows discovered repos from host directory
+  - User selects repo → auto-fills `repo_path`
+  - Manual fields: name (pre-filled from repo name), description, color picker
+- Project detail view: shows associated sessions
+- Files: `frontend/src/components/Projects/ProjectList.tsx`, `frontend/src/components/Projects/ProjectForm.tsx`, `frontend/src/components/Workspaces/WorkspaceBrowser.tsx` (new), `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`
 
-## Phase 2: Tasks Tab + Cron Scheduler + Inbox
+### Task 11 — Frontend: Feature Submission Form
+- Simple form with:
+  - Project selector (dropdown)
+  - Feature description (textarea, multiline)
+  - Submit button
+- On submit: `POST /api/sessions`, redirect to session detail view
+- Mobile-optimized: large tap targets, clear focus states
+- Files: `frontend/src/components/Features/SubmitForm.tsx`, `frontend/src/lib/api.ts`
 
-Backend services and UI for scheduling and notifications. Build after Phase 1 ships.
+### Task 12 — Frontend: Session List View
+- List all sessions (filterable by project, status)
+- Each session card shows:
+  - Feature description (truncated)
+  - Project name + color tag
+  - Status badge (`queued`, `running`, `completed`, `failed`)
+  - Timestamp
+  - Tap to view details
+- Pull-to-refresh on mobile
+- Files: `frontend/src/components/Sessions/SessionList.tsx`, `frontend/src/components/Sessions/SessionCard.tsx`
 
-### Task 9 — Build Tasks sidebar tab (frontend)
-- New "Tasks" section in sidebar navigation
-- Tasks view shows: running sessions (with live status), recently completed tasks, scheduled tasks
-- Each task card: name, project, status, duration/last run, quick actions (stop, restart, view)
-- Files: `frontend/src/components/Tasks/TasksView.tsx` (new), `frontend/src/components/Tasks/TaskCard.tsx` (new)
+### Task 13 — Frontend: Session Detail View
+- View single session:
+  - Feature description (full)
+  - Status + timestamps
+  - Real-time log streaming (WebSocket)
+  - Stop/restart buttons (if applicable)
+  - PR link (if completed)
+- Auto-scroll logs to bottom
+- Mobile-friendly log viewer (monospace, scrollable)
+- Files: `frontend/src/components/Sessions/SessionDetail.tsx`, `frontend/src/components/Sessions/LogViewer.tsx`
 
-### Task 10 — Build cron scheduler backend
-- New `schedules` DB table: id, project_id, name, cron_expression, prompt, repo_path, enabled, last_run, next_run, created_at
-- Use APScheduler for cron execution (triggers `session_manager.create_session()` + sends prompt)
-- New backend service: `backend/services/scheduler.py`
-- API endpoints:
-  - `GET /api/schedules` — list all schedules
-  - `POST /api/schedules` — create schedule (project_id, name, cron_expression, prompt)
-  - `PUT /api/schedules/{id}` — update schedule (edit cron, prompt, enable/disable)
-  - `DELETE /api/schedules/{id}` — delete schedule
-  - `POST /api/schedules/{id}/run-now` — trigger immediately
-- Files: `backend/services/scheduler.py` (new), `backend/routers/schedules.py` (new), `backend/models.py`, `backend/main.py` (lifespan init)
+### Task 14 — Frontend: Welcome Screen
+- Empty state when no sessions exist
+- Chicken logo (large, centered)
+- "Submit your first feature request" CTA button
+- Links to: create project, submit feature
+- Files: `frontend/src/components/Welcome/WelcomeScreen.tsx`
 
-### Task 11 — Build schedule editor UI
-- Per-project schedule management (accessed from project view or Tasks tab)
-- Schedule creation form: name, cron expression (with human-readable preview like "Every weekday at 9am"), prompt text, enable/disable toggle
-- Schedule list with next run time, last run status, quick toggle
-- Files: `frontend/src/components/Tasks/ScheduleEditor.tsx` (new), `frontend/src/components/Tasks/CronInput.tsx` (new), `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`
+### Task 15 — Infrastructure: Host Execution Environment
+- Ensure Claude CLI installed on host (NUC)
+- Configure Claude API keys (environment variables or config file)
+- Set up git on host (user, email, SSH keys for GitHub)
+- Verify repo access (can clone/push)
+- Document setup steps in `docs/SETUP.md`
 
-### Task 12 — Build notifications backend
-- New `notifications` DB table: id, type (task_complete, needs_input, schedule_run, error), title, message, session_id, project_id, read, created_at
-- Notifications created by: task completion, session errors, scheduled task runs, sessions needing user input
-- Push to connected frontends via WebSocket hub (new `notification` message type)
-- API endpoints:
-  - `GET /api/notifications` — list notifications (with unread count)
-  - `POST /api/notifications/{id}/read` — mark as read
-  - `POST /api/notifications/read-all` — mark all as read
-- Files: `backend/models.py`, `backend/routers/notifications.py` (new), `backend/ws/hub.py`, `backend/main.py`
+### Task 16 — Infrastructure: Tailscale Networking
+- Backend accessible via Tailscale from iPhone
+- Test connectivity: `curl https://<tailscale-ip>/api/projects` from iPhone
+- Document Tailscale setup in `docs/SETUP.md`
 
-### Task 13 — Build Inbox UI in sidebar
-- Dedicated "Inbox" tab in sidebar with unread badge count
-- Notification list: icon by type, title, message preview, timestamp, read/unread styling
-- Tap notification to navigate to relevant session/project
-- Mark as read on tap, "Mark all read" button
-- Files: `frontend/src/components/Inbox/InboxView.tsx` (new), `frontend/src/components/Inbox/NotificationCard.tsx` (new), `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`
+### Task 17 — PWA Configuration
+- Service worker for offline support
+- `manifest.json` with chicken logo icons
+- Add-to-home-screen prompt
+- Test on iPhone: install to home screen, launch, verify logo
+- Files: `frontend/public/sw.js`, `frontend/public/manifest.json`, `frontend/index.html`
+
+### Task 18 — End-to-End Testing
+- Test full workflow from iPhone:
+  1. Open Cockpit PWA
+  2. Create project
+  3. Submit feature request
+  4. Monitor logs in real-time
+  5. Verify PR created on GitHub
+  6. Stop/restart session
+- Document any issues, fix critical bugs
 
 ---
 
 ## Architecture Notes
 
-- [x] New API endpoints: `/api/projects/*`, `/api/schedules/*`, `/api/notifications/*`
-- [x] New backend services: `scheduler.py` (APScheduler cron engine)
-- [x] WebSocket changes: add `notification` message type to hub
-- [x] New frontend components: Sidebar, Header, ProjectList, NewProjectModal, WelcomeScreen, AgentSelector, ProfileSection, AgentList, TasksView, TaskCard, ScheduleEditor, CronInput, InboxView, NotificationCard
-- [x] DB changes: `projects` table, `schedules` table, `notifications` table; `sessions` gets `project_id` FK
-- [x] Config changes: scheduler settings in `backend/config.py`
-- [x] Logo/branding: favicon, PWA icons, Apple touch icon, sidebar header, welcome screen
+### Backend Services
+- **Agent Executor:** Spawns Claude CLI on host via PTY
+- **Queue Worker:** Polls for queued sessions, runs them sequentially
+- **WebSocket Hub:** Manages log streaming to connected clients
+- **API Routers:** Projects, Sessions, (future: Notifications, Schedules)
+
+### Frontend Structure
+- **Mobile Nav:** Hamburger + drawer (replaces bottom nav)
+- **Projects:** List, create, view
+- **Sessions:** List, detail, logs
+- **Welcome:** Empty state with chicken logo
+
+### Database Tables
+- `projects`: Project metadata
+- `sessions`: Feature requests and execution state
+
+### Key Integrations
+- **PTY Management:** Spawn/monitor Claude CLI on host
+- **WebSocket:** Real-time log streaming
+- **Tailscale:** Secure mobile access
+
+---
 
 ## Open Questions
 
-- What color palette for project icons in sidebar? (Can default to a preset list and let users pick)
-- Should the cron scheduler support one-shot scheduled tasks (run once at a specific time) in addition to recurring?
-- Maximum number of concurrent scheduled sessions? (To avoid overwhelming the NUC)
+1. **Navigation pattern:** Hamburger + drawer vs top tabs? (Recommend drawer for MVP)
+2. **Queue concurrency:** Always one-at-a-time, or configurable N concurrent sessions? (One for MVP)
+3. **Log persistence:** Store full logs in DB or just file paths? (File paths, stream from files)
+4. **Error handling:** How to surface agent crashes to UI? (Show in logs, mark session as `failed`)
+
+---
+
+## Success Criteria
+
+- [ ] Chicken logo visible in all sizes (favicon, PWA icons, UI)
+- [ ] Mobile nav works perfectly on iPhone (no bottom nav issues)
+- [ ] Can submit feature request from iPhone
+- [ ] Can monitor logs in real-time on iPhone
+- [ ] Agent runs on host (not Docker), completes `/new` workflow
+- [ ] PR created successfully and linked in UI
+- [ ] Can stop/restart sessions from mobile
+- [ ] PWA installable to iPhone home screen
+
+---
+
+## Next Steps
+
+1. Start with Task 1 (chicken logo formats) - quick win, sets branding
+2. Then Task 2 (mobile nav) - critical UX fix
+3. Then Task 3 (dynamic workspace discovery) - replace hardcoded repos
+4. Then backend foundation (Tasks 4-9) - enable execution
+5. Then frontend UI (Tasks 10-14) - complete the loop
+6. Infrastructure & testing (Tasks 15-18) - deploy and validate

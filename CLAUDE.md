@@ -1,447 +1,155 @@
-# Claude Cockpit
+# Cockpit Autonomous Development System
 
-A self-hosted React PWA + FastAPI backend for managing multiple Claude Code agent sessions from your iPhone, running on an Intel NUC over Tailscale.
+A self-hosted mobile interface for triggering Claude Code `/new` workflows remotely.
 
-Cockpit Autonomous Feature Factory
-Board-Level Vision & System Definition
-Executive Summary
+## What It Does
 
-Cockpit is a self-hosted autonomous software development system that converts feature ideas into fully implemented pull requests — without human intervention during execution.
+**Input:** Feature idea from mobile interface (iPhone)
+**Output:** Production-ready pull request via `/new` skill workflow
 
-A user initiates a feature from a mobile interface. The system:
+**Simple Process:**
+1. Submit feature request from mobile UI
+2. Backend triggers `/new` skill on host machine
+3. `/new` → `/plan` → `/implement` → `/finish` workflow executes
+4. PR is created automatically
+5. Human reviews and merges
 
-Generates a production-grade PRD and technical plan
+**Core Insight:** Don't reinvent the wheel. The `/new` skill workflow already works - just trigger it remotely.
 
-Breaks the work into a dependency-aware task graph
+## Architecture
 
-Executes implementation autonomously via managed AI agents
+### Three Simple Components
 
-Iterates until all tests pass
+**1. Mobile UI (React PWA)**
+- iPhone-optimized interface for feature submission
+- Session monitoring (view logs, stop/restart)
+- Project organization
+- Works over Tailscale from anywhere
 
-Opens a fully documented pull request
+**2. Backend Control Plane (FastAPI)**
+- Receives feature requests from UI
+- Triggers `/new` skill on host machine (not in Docker)
+- Manages session lifecycle via PTY
+- Streams logs back to UI via WebSocket
+- Persists state in PostgreSQL
 
-The system stops at PR creation. A human retains merge authority.
+**3. Claude Code Agent (Host Machine)**
+- Runs `/new` skill workflow for each feature
+- Executes on host (access to git, tests, tools)
+- Not sandboxed in Docker - full system access
+- Uses existing proven workflow: `/new` → `/plan` → `/implement` → `/finish`
 
-Cockpit transforms feature ideation into automated engineering throughput.
+## Why This Works
 
-The Problem
+**Proven Workflow:** `/new` skill already handles:
+- Planning (creates PLAN.md)
+- Implementation (writes code, runs tests)
+- Quality gates (linting, testing)
+- PR creation (git push, gh pr create)
 
-Modern software development suffers from three bottlenecks:
+**No DAG Complexity:** Sequential execution is fine. One feature at a time is simpler and more reliable.
 
-Planning overhead — turning ideas into structured execution plans
+**Mobile-First Control:** The hard part isn't execution - it's being able to submit features remotely and monitor progress from your phone.
 
-Engineering bandwidth — implementing and testing features
+## Key Design Decisions
 
-Context switching — coordinating tools, environments, branches, and CI
+### ✅ Do
+- **Simple queue:** Accept features from UI, run them one at a time
+- **Host-based execution:** Agents run on host machine with full access
+- **Mobile-optimized nav:** Bottom nav doesn't work on iPhone - use mobile-friendly patterns
+- **Stream logs:** Real-time feedback via WebSocket
+- **Chicken logo:** Use new chicken branding for all icons/assets
 
-Even senior engineers spend substantial time translating product ideas into structured execution before actual implementation begins.
+### ❌ Don't
+- **No DAG execution:** Too complex. `/new` workflow is proven and simple.
+- **No Docker agents:** Agents need host access for git, tools, tests
+- **No parallel execution:** One feature at a time is fine for MVP
+- **No complex orchestration:** Let `/new` skill handle the workflow
 
-Meanwhile, AI coding tools today are:
+## Safety & Governance
 
-Interactive
+**Guardrails inherited from `/new` skill:**
+- Execution in feature branches
+- Tests must pass before commit
+- Human approval required at PR merge
+- No auto-merge, no force push
 
-Session-based
+**Additional UI safeguards:**
+- View session logs before approving PR
+- Stop/restart sessions from mobile
+- Manual trigger per feature (no automatic execution)
 
-Short-lived
+## Infrastructure
 
-Context-fragile
-
-Human-dependent
-
-They assist engineers — they do not replace execution loops.
-
-Cockpit eliminates execution as a manual activity.
-
-The Solution
-
-Cockpit is a background autonomous engineering engine with:
-
-Strategic planning intelligence
-
-Dependency-aware task orchestration
-
-Multi-account rate limit management
-
-Context compaction and persistence
-
-Git-native execution
-
-Mobile command interface
-
-The user defines intent. The system delivers a pull request.
-
-Core Design Principles
-
-Human defines intent. Machine executes.
-
-Stop at pull request. Never auto-merge.
-
-Durable execution. Survives crashes and rate limits.
-
-Git-native. All work occurs in isolated feature branches.
-
-Safe by design. Bounded iteration and rollback-aware.
-
-Mobile-first command surface.
-
-System Architecture
-
-Cockpit consists of four primary engines:
-
-1. Planning Engine
-
-Responsible for:
-
-PRD generation
-
-Technical architecture proposal
-
-Task decomposition
-
-Dependency graph creation
-
-Test strategy
-
-Rollback strategy
-
-Risk identification
-
-Definition of done
-
-Output:
-Structured JSON containing:
-
-PRD
-
-Technical design
-
-Task DAG
-
-Acceptance criteria
-
-This creates deterministic execution input.
-
-2. Orchestration Engine (Ralph Loop)
-
-A persistent background state machine that:
-
-Monitors task readiness
-
-Dispatches execution agents
-
-Detects failures
-
-Detects rate limits
-
-Rotates AI accounts
-
-Compacts context
-
-Persists execution checkpoints
-
-Replans when necessary
-
-This engine owns the lifecycle of a feature from planning to PR.
-
-State Machine:
-
-REQUESTED
-→ PLANNING
-→ TASK_GRAPH_READY
-→ EXECUTING
-→ TESTING
-→ FIXING
-→ READY_FOR_PR
-→ PR_OPENED
-
-3. Execution Engine (Reckless Mode)
-
-A task-focused AI executor that:
-
-Pulls task definition
-
-Writes code
-
-Runs tests
-
-Fixes failures
-
-Commits changes
-
-Iterates until success
-
-Execution is sandboxed to:
-
-Feature branch
-
-Bounded iteration count
-
-Required test pass before commit
-
-It operates in short-loop cycles:
-
-Implement → Test → Fix → Commit → Repeat
-
-4. Context Management Engine
-
-Long-running AI loops fail without context discipline.
-
-Cockpit introduces:
-
-Working Context:
-
-Active task
-
-Modified files
-
-Test output
-
-Historical Context:
-
-PRD summary
-
-Completed task summaries
-
-Architectural constraints
-
-Compaction Protocol:
-
-After N iterations, summarize work into structured memory
-
-Replace full history with compressed representation
-
-Preserve only active diffs
-
-This enables indefinite execution without token collapse.
-
-Differentiation
-
-Cockpit is not:
-
-An AI coding assistant
-
-A chat wrapper
-
-A Git automation script
-
-A CI bot
-
-Cockpit is:
-
-A self-hosted autonomous development system with durable planning, execution, and orchestration.
-
-It combines:
-
-Strategic planning
-
-Background execution
-
-Multi-agent rotation
-
-Mobile command control
-
-No existing consumer AI product offers autonomous background feature completion to PR.
-
-Safety & Governance
-
-To prevent destructive behavior:
-
-Execution limited to feature branches
-
-No force pushes
-
-No auto-merge
-
-Tests must pass before commit
-
-Iteration caps per task
-
-File change size thresholds
-
-Replan triggers on repeated failure
-
-The human remains final authority at PR review.
-
-Infrastructure Overview
-
+```
 User (iPhone PWA)
-→ FastAPI Control Plane
-→ PostgreSQL (state persistence)
-→ Worker Service (Orchestrator)
-→ Claude CLI Execution (PTY managed)
-→ Git repository
-→ Pull Request
-
-Networking:
-Tailscale secure access
-
-Authentication:
-Network-level ACL (no app-level auth)
-
-Roadmap
-
-Phase 1 – Planning Engine
-Generate PRD and structured task DAG
-
-Phase 2 – Single Task Executor
-Autonomous implementation of isolated tasks
-
-Phase 3 – Orchestrated DAG Execution
-Dependency-aware parallel execution
-
-Phase 4 – Durable Resume & Compaction
-Crash recovery and token management
-
-Phase 5 – Parallel Branch Execution
-Independent DAG branches executed concurrently
-
-Full System Prompt Definition
-
-Below is the master system definition prompt that governs Cockpit’s behavior.
-
-MASTER SYSTEM PROMPT – Cockpit Autonomous Engineering System
-
-You are part of the Cockpit Autonomous Engineering System.
-
-Your role is to act as a senior staff-level engineer operating inside a self-contained software repository.
-
-You are not a conversational assistant.
-
-You are a background execution agent tasked with delivering production-ready pull requests.
-
-You must:
-
-Operate deterministically
-
-Follow structured output formats
-
-Respect branch isolation
-
-Pass all tests before committing
-
-Stop at PR creation
-
-You do not merge code.
-You do not bypass tests.
-You do not delete unrelated files.
-
-PLANNING MODE PROMPT
-
-You are operating in PLANNING MODE.
-
-Given a feature request, generate:
-
-Product Requirements Document
-
-Technical Design Specification
-
-Explicit Task Breakdown
-
-Dependency Graph (DAG)
-
-Test Plan
-
-Rollback Plan
-
-Risk Assessment
-
-Definition of Done
-
-Output format (JSON only):
-
-{
-"prd": "...",
-"technical_design": "...",
-"tasks": [
-{
-"id": "T1",
-"description": "...",
-"depends_on": []
-}
-],
-"test_plan": "...",
-"rollback_plan": "...",
-"risks": "...",
-"definition_of_done": "..."
-}
-
-Do not include commentary.
-Do not include markdown.
-Output must be valid JSON.
-
-EXECUTION MODE PROMPT
-
-You are operating in EXECUTION MODE.
-
-You are implementing task: {TASK_ID}
-
-You must:
-
-Identify relevant files.
-
-Modify code to satisfy task requirements.
-
-Run tests.
-
-Fix all failing tests.
-
-Ensure linting passes.
-
-Commit only when tests pass.
-
-Rules:
-
-Work only in current feature branch.
-
-Never remove unrelated code.
-
-Never commit failing tests.
-
-Never stop until task is complete or iteration limit reached.
-
-After each iteration, summarize progress in structured format:
-
-{
-"changes_made": "...",
-"tests_status": "...",
-"next_action": "..."
-}
-
-You operate autonomously.
-You do not ask for human clarification.
-You infer intent from PRD and task definition.
-
-Stop only when tests pass and task is complete.
-
-ORCHESTRATOR MODE PROMPT
-
-You are monitoring execution progress.
-
-If:
-
-Tests repeatedly fail → Trigger replan.
-
-Task exceeds iteration cap → Escalate to replanning.
-
-Rate limit detected → Persist state and rotate account.
-
-Execution completes → Mark task complete.
-
-Maintain state consistency.
-
-Never lose execution context.
-
-Strategic Value
-
-Cockpit represents a new category:
-
-Autonomous Development Infrastructure
-
-It transforms feature ideation into structured, background-executed engineering output.
-
-The human defines what.
-The system determines how.
-The AI executes.
-The human approves.
-
-This preserves control while eliminating execution overhead.
+  ↓ Tailscale
+Backend (FastAPI on NUC)
+  ↓ PTY spawn
+Claude Code Agent (host machine)
+  ↓ /new skill
+Git repository → Pull Request
+```
+
+**Key Infrastructure Notes:**
+- **Networking:** Tailscale secure access
+- **Authentication:** Network-level ACL (no app-level auth)
+- **Agent Execution:** PTY-managed Claude CLI on host (not Docker)
+- **State:** PostgreSQL for session tracking
+
+## Tech Stack
+
+**Frontend:** React, TypeScript, Vite, Tailwind CSS
+- Mobile-first navigation (not bottom tabs - poor iPhone UX)
+- Chicken logo branding
+- PWA for home screen installation
+
+**Backend:** FastAPI, Python, PostgreSQL
+- PTY management for Claude CLI
+- WebSocket log streaming
+- Session queue (FIFO, one at a time)
+
+**Agent:** Claude Code CLI on host
+- Uses existing `/new` skill workflow
+- Full host system access (git, npm, pytest, etc.)
+
+## Implementation Roadmap
+
+See [FEATURES.md](FEATURES.md) for detailed feature breakdown.
+
+**Phase 0 (MVP):** UI + Backend + `/new` integration
+- Mobile interface for feature submission
+- Session management and monitoring
+- PTY-based agent execution on host
+- One feature at a time, simple queue
+
+**Phase 1+ (Future):** Enhancements
+- Multiple concurrent sessions (if needed)
+- Scheduled features (cron-triggered `/new`)
+- Notifications/inbox
+- Advanced monitoring
+
+## Strategic Value
+
+Cockpit makes autonomous development **accessible from anywhere**.
+
+- Submit features while walking the dog
+- Monitor progress from your phone
+- Review PRs on mobile
+- Merge when ready
+
+**The innovation isn't in execution (Claude Code already handles that). The innovation is in remote accessibility and mobile UX.**
+
+## Current Status
+
+**In Progress:**
+- ✅ Documentation restructure (this file + FEATURES.md)
+- 🔄 Phase 0 implementation next
+  - Logo integration (chicken branding)
+  - Mobile-friendly navigation
+  - Host-based agent execution
+  - Feature submission UI
+
+---
+
+**Next:** Build Phase 0 to enable remote feature submission from iPhone.
