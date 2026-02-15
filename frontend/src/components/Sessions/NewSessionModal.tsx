@@ -15,6 +15,7 @@ export default function NewSessionModal({
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState("");
+  const [featureDescription, setFeatureDescription] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,7 @@ export default function NewSessionModal({
       const session = await api.createSession({
         project_id: selectedProjectId,
         name: sessionName || `${project.name}-session`,
+        feature_description: featureDescription || undefined,
       });
       onSessionCreated(session);
     } catch (err) {
@@ -132,6 +134,24 @@ export default function NewSessionModal({
                 placeholder="e.g., Morning Standup"
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white placeholder-gray-500 focus:border-accent focus:outline-none"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Feature Request (optional)
+              </label>
+              <textarea
+                value={featureDescription}
+                onChange={(e) => setFeatureDescription(e.target.value)}
+                placeholder="Describe what you want to build... (e.g., Add dark mode toggle)"
+                rows={3}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white placeholder-gray-500 focus:border-accent focus:outline-none resize-none"
+              />
+              {featureDescription && (
+                <p className="mt-2 text-xs text-accent/80">
+                  Will auto-trigger /new workflow when session starts
+                </p>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">
