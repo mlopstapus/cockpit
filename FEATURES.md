@@ -11,6 +11,42 @@ Detailed breakdown of implementation phases, mapped to engines with dependencies
 
 ---
 
+## Phase 0: Control Plane & UI (PRIORITY)
+
+**Goal:** Build mobile-first UI and backend APIs for manual job submission and monitoring
+
+**Rationale:** Ship UI first to enable remote feature submission while autonomous engines are being built. Allows manual planning/execution workflows during development.
+
+### Features
+
+| ID | Feature | Engine | Dependencies | Status | Acceptance Criteria |
+|---|---|---|---|---|---|
+| UI0.1 | Logo & Branding Assets | Frontend | - | 🔴 | Favicon, PWA icons, Apple touch icons generated from source PNG |
+| UI0.2 | Responsive Sidebar Component | Frontend | - | 🔴 | Slide-out drawer on mobile, persistent panel on desktop, swipe gestures |
+| UI0.3 | Remove Bottom Nav, Update AppShell | Frontend | UI0.2 | 🔴 | Replace bottom tabs with sidebar layout, add top header with hamburger |
+| UI0.4 | Projects Backend (DB + API) | Backend | - | 🔴 | `projects` table, CRUD endpoints, link sessions to projects |
+| UI0.5 | Projects Frontend UI | Frontend | UI0.4 | 🔴 | Project list in sidebar, create/edit/delete projects, colored icons |
+| UI0.6 | Chat View with Welcome Screen | Frontend | UI0.2 | 🔴 | Empty state with logo + "How can I help?", agent selector dropdown |
+| UI0.7 | Settings & Profile in Sidebar | Frontend | UI0.2 | 🔴 | Settings pinned to sidebar bottom, profile section, agent list with utilization |
+| UI0.8 | Session Management API | Backend | UI0.4 | 🔴 | Create/list/stop sessions, link to projects, stream logs via WebSocket |
+| UI0.9 | Session Monitor UI | Frontend | UI0.8 | 🔴 | View active sessions, see logs, stop/restart, status indicators |
+| UI0.10 | Feature Request Submission | Frontend | UI0.8 | 🔴 | Mobile-friendly form to submit feature requests, associate with project |
+| UI0.11 | Manual Planning Trigger | Frontend | UI0.8 | 🔴 | Button to trigger planning mode, view planning output (text/JSON) |
+| UI0.12 | Manual Execution Trigger | Frontend | UI0.8 | 🔴 | Button to execute planned tasks, select which tasks to run |
+| UI0.13 | Task Scheduler Backend (Cron) | Backend | UI0.4, UI0.8 | 🔴 | `schedules` table, APScheduler integration, CRUD endpoints |
+| UI0.14 | Task Scheduler UI | Frontend | UI0.13 | 🔴 | Cron expression editor, schedule list, enable/disable, run-now button |
+| UI0.15 | Notifications Backend | Backend | UI0.8 | 🔴 | `notifications` table, push via WebSocket, mark read/unread |
+| UI0.16 | Inbox UI in Sidebar | Frontend | UI0.15 | 🔴 | Inbox tab with unread badge, notification list, mark as read |
+| UI0.17 | Bug Fixes & Cleanup | Frontend | - | 🔴 | Fix service worker, remove compiled .js files, fix dual message send, add path alias |
+
+**Engine Breakdown:**
+- **Frontend UI:** UI0.1-UI0.3, UI0.5-UI0.7, UI0.9-UI0.12, UI0.14, UI0.16-UI0.17 (13 features)
+- **Backend API:** UI0.4, UI0.8, UI0.13, UI0.15 (4 features)
+
+**Note:** This phase maps to the existing `PLAN.md` UI overhaul. Complete this first to enable remote operation.
+
+---
+
 ## Phase 1: Planning Engine
 
 **Goal:** Generate PRD and structured task DAG from feature requests
@@ -137,7 +173,9 @@ Detailed breakdown of implementation phases, mapped to engines with dependencies
 ## Dependency Graph (High-Level)
 
 ```
-Phase 1 (Planning Engine)
+Phase 0 (Control Plane & UI) ← BUILD FIRST
+  ↓
+Phase 1 (Planning Engine) ← Can start before Phase 0 completes
   ↓
 Phase 2 (Single Task Executor)
   ↓
@@ -149,16 +187,22 @@ Phase 5 (Parallel Branch Execution)
 ```
 
 **Critical Path:**
-1. Phase 1 must complete before any execution
-2. Phase 2 must complete before orchestration
-3. Phase 3 must complete before parallel branch execution
-4. Phase 4 can be built alongside Phase 3 (orthogonal concerns)
+1. **Phase 0 is top priority** - enables remote job submission while automation is built
+2. Phase 1 can start in parallel with Phase 0 (manual planning → UI integration later)
+3. Phase 2 must complete before orchestration
+4. Phase 3 must complete before parallel branch execution
+5. Phase 4 can be built alongside Phase 3 (orthogonal concerns)
 
 ---
 
 ## Implementation Priority
 
-### Must-Have (MVP)
+### Ship First (Enables Remote Operation)
+- **Phase 0:** Control Plane & UI (UI0.1-UI0.17)
+  - **Why first:** Enables feature submission from iPhone and manual monitoring while autonomous engines are built
+  - **Enables:** Remote operation, manual planning/execution workflows during development
+
+### Must-Have (Autonomous MVP)
 - **Phase 1:** Planning Engine (P1.1-P1.10)
 - **Phase 2:** Single Task Executor (E2.1-E2.11)
 - **Phase 3:** Orchestrated DAG Execution (O3.1-O3.10)
@@ -173,23 +217,34 @@ Phase 5 (Parallel Branch Execution)
 
 ## Feature Summary by Engine
 
-| Engine | Total Features | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
-|---|---|---|---|---|---|---|
-| **Planning Engine** | 9 | 9 | 0 | 0 | 0 | 0 |
-| **Execution Engine** | 11 | 0 | 10 | 0 | 0 | 1 |
-| **Orchestration Engine** | 16 | 1 | 1 | 10 | 1 | 7 |
-| **Context Management Engine** | 9 | 0 | 0 | 0 | 9 | 0 |
-| **Total** | **45** | **10** | **11** | **10** | **10** | **8** |
+| Engine | Total Features | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
+|---|---|---|---|---|---|---|---|---|
+| **Frontend UI** | 13 | 13 | 0 | 0 | 0 | 0 | 0 |
+| **Backend API** | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
+| **Planning Engine** | 9 | 0 | 9 | 0 | 0 | 0 | 0 |
+| **Execution Engine** | 11 | 0 | 0 | 10 | 0 | 0 | 1 |
+| **Orchestration Engine** | 16 | 0 | 1 | 1 | 10 | 1 | 7 |
+| **Context Management Engine** | 9 | 0 | 0 | 0 | 0 | 9 | 0 |
+| **Total** | **62** | **17** | **10** | **11** | **10** | **10** | **8** |
 
 ---
 
 ## Next Steps
 
-1. **Start with Phase 1:** Implement Planning Engine features P1.1-P1.10
-2. **Validate Planning Output:** Ensure JSON schema is deterministic and complete
-3. **Build Execution Foundation:** Implement Phase 2 features E2.1-E2.11 for single-task execution
-4. **Orchestrate:** Implement Phase 3 features O3.1-O3.10 for full DAG execution
-5. **Harden:** Add Phase 4 features C4.1-C4.10 for production durability
-6. **Scale:** Add Phase 5 features M5.1-M5.8 for parallel branch execution
+### Immediate (Phase 0 - UI First)
+1. **Build Control Plane:** Implement UI features UI0.1-UI0.17 from PLAN.md
+   - Enables remote feature submission from iPhone
+   - Allows manual planning/execution while autonomous engines are built
+2. **Deploy to NUC:** Get UI running on Intel NUC over Tailscale
+3. **Test Mobile Workflow:** Submit features remotely, monitor sessions
+
+### Then (Autonomous Engines)
+4. **Implement Planning Engine:** Phase 1 features P1.1-P1.10
+5. **Integrate Planning into UI:** Connect UI0.11 to P1.10 API endpoint
+6. **Build Execution Foundation:** Phase 2 features E2.1-E2.11 for single-task execution
+7. **Integrate Execution into UI:** Connect UI0.12 to E2.11 API endpoint
+8. **Orchestrate:** Phase 3 features O3.1-O3.10 for full DAG execution
+9. **Harden:** Phase 4 features C4.1-C4.10 for production durability
+10. **Scale:** Phase 5 features M5.1-M5.8 for parallel branch execution
 
 **Update this document as features are implemented and status changes.**
