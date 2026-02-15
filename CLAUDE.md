@@ -1,125 +1,155 @@
 # Cockpit Autonomous Development System
 
-A self-hosted system that converts feature ideas into fully implemented pull requests — autonomously.
+A self-hosted mobile interface for triggering Claude Code `/new` workflows remotely.
 
 ## What It Does
 
-**Input:** Feature idea from mobile interface
-**Output:** Production-ready pull request with passing tests
+**Input:** Feature idea from mobile interface (iPhone)
+**Output:** Production-ready pull request via `/new` skill workflow
 
-**Process:**
-1. Generates PRD and technical plan
-2. Breaks work into dependency-aware task graph
-3. Executes implementation autonomously via AI agents
-4. Iterates until all tests pass
-5. Opens fully documented pull request
+**Simple Process:**
+1. Submit feature request from mobile UI
+2. Backend triggers `/new` skill on host machine
+3. `/new` → `/plan` → `/implement` → `/finish` workflow executes
+4. PR is created automatically
+5. Human reviews and merges
 
-**Human Authority:** System stops at PR creation. Human retains merge authority.
-
-## Core Principles
-
-- **Human defines intent. Machine executes.**
-- **Stop at pull request. Never auto-merge.**
-- **Durable execution.** Survives crashes and rate limits.
-- **Git-native.** All work in isolated feature branches.
-- **Safe by design.** Bounded iteration and rollback-aware.
-- **Mobile-first** command interface.
+**Core Insight:** Don't reinvent the wheel. The `/new` skill workflow already works - just trigger it remotely.
 
 ## Architecture
 
-### Four Core Engines
+### Three Simple Components
 
-**1. Planning Engine**
-- Generates PRD and technical design
-- Creates task dependency graph (DAG)
-- Defines test strategy and acceptance criteria
-- Outputs structured JSON for deterministic execution
+**1. Mobile UI (React PWA)**
+- iPhone-optimized interface for feature submission
+- Session monitoring (view logs, stop/restart)
+- Project organization
+- Works over Tailscale from anywhere
 
-**2. Orchestration Engine (Ralph Loop)**
-- Persistent background state machine
-- Monitors task readiness and dispatches execution agents
-- Detects failures and rate limits
-- Rotates AI accounts and compacts context
-- Manages full lifecycle: REQUESTED → PLANNING → EXECUTING → TESTING → FIXING → PR_OPENED
+**2. Backend Control Plane (FastAPI)**
+- Receives feature requests from UI
+- Triggers `/new` skill on host machine (not in Docker)
+- Manages session lifecycle via PTY
+- Streams logs back to UI via WebSocket
+- Persists state in PostgreSQL
 
-**3. Execution Engine**
-- Task-focused AI executor
-- Sandboxed to feature branch with bounded iteration
-- Short-loop cycles: Implement → Test → Fix → Commit → Repeat
-- Tests must pass before commit
+**3. Claude Code Agent (Host Machine)**
+- Runs `/new` skill workflow for each feature
+- Executes on host (access to git, tests, tools)
+- Not sandboxed in Docker - full system access
+- Uses existing proven workflow: `/new` → `/plan` → `/implement` → `/finish`
 
-**4. Context Management Engine**
-- Prevents token collapse in long-running loops
-- Compacts history into structured memory after N iterations
-- Preserves active diffs, summarizes completed work
-- Enables indefinite execution
+## Why This Works
+
+**Proven Workflow:** `/new` skill already handles:
+- Planning (creates PLAN.md)
+- Implementation (writes code, runs tests)
+- Quality gates (linting, testing)
+- PR creation (git push, gh pr create)
+
+**No DAG Complexity:** Sequential execution is fine. One feature at a time is simpler and more reliable.
+
+**Mobile-First Control:** The hard part isn't execution - it's being able to submit features remotely and monitor progress from your phone.
+
+## Key Design Decisions
+
+### ✅ Do
+- **Simple queue:** Accept features from UI, run them one at a time
+- **Host-based execution:** Agents run on host machine with full access
+- **Mobile-optimized nav:** Bottom nav doesn't work on iPhone - use mobile-friendly patterns
+- **Stream logs:** Real-time feedback via WebSocket
+- **Chicken logo:** Use new chicken branding for all icons/assets
+
+### ❌ Don't
+- **No DAG execution:** Too complex. `/new` workflow is proven and simple.
+- **No Docker agents:** Agents need host access for git, tools, tests
+- **No parallel execution:** One feature at a time is fine for MVP
+- **No complex orchestration:** Let `/new` skill handle the workflow
 
 ## Safety & Governance
 
-**Guardrails:**
-- Execution limited to feature branches
-- No force pushes, no auto-merge
+**Guardrails inherited from `/new` skill:**
+- Execution in feature branches
 - Tests must pass before commit
-- Iteration caps per task
-- File change size thresholds
-- Replan triggers on repeated failure
+- Human approval required at PR merge
+- No auto-merge, no force push
 
-**Human remains final authority at PR review.**
+**Additional UI safeguards:**
+- View session logs before approving PR
+- Stop/restart sessions from mobile
+- Manual trigger per feature (no automatic execution)
 
 ## Infrastructure
 
 ```
 User (iPhone PWA)
-  ↓
-FastAPI Control Plane
-  ↓
-PostgreSQL (state persistence)
-  ↓
-Worker Service (Orchestrator)
-  ↓
-Claude CLI Execution (PTY managed)
-  ↓
+  ↓ Tailscale
+Backend (FastAPI on NUC)
+  ↓ PTY spawn
+Claude Code Agent (host machine)
+  ↓ /new skill
 Git repository → Pull Request
 ```
 
-**Networking:** Tailscale secure access
-**Authentication:** Network-level ACL (no app-level auth)
+**Key Infrastructure Notes:**
+- **Networking:** Tailscale secure access
+- **Authentication:** Network-level ACL (no app-level auth)
+- **Agent Execution:** PTY-managed Claude CLI on host (not Docker)
+- **State:** PostgreSQL for session tracking
 
 ## Tech Stack
 
 **Frontend:** React, TypeScript, Vite, Tailwind CSS
-**Backend:** FastAPI, Python
-**Testing:** pytest (backend), npm test (frontend)
-**Linting:** ruff/pylint (Python), eslint/tsc (TypeScript)
+- Mobile-first navigation (not bottom tabs - poor iPhone UX)
+- Chicken logo branding
+- PWA for home screen installation
 
-## What Cockpit Is Not
+**Backend:** FastAPI, Python, PostgreSQL
+- PTY management for Claude CLI
+- WebSocket log streaming
+- Session queue (FIFO, one at a time)
 
-- ❌ AI coding assistant
-- ❌ Chat wrapper
-- ❌ Git automation script
-- ❌ CI bot
-
-## What Cockpit Is
-
-✅ **Self-hosted autonomous development system** with durable planning, execution, and orchestration.
-
-✅ Combines strategic planning, background execution, multi-agent rotation, and mobile command control.
-
-✅ **No existing consumer AI product offers autonomous background feature completion to PR.**
-
-## Strategic Value
-
-Cockpit represents a new category: **Autonomous Development Infrastructure**
-
-It transforms feature ideation into structured, background-executed engineering output.
-
-- **The human defines what.**
-- **The system determines how.**
-- **The AI executes.**
-- **The human approves.**
-
-This preserves control while eliminating execution overhead.
+**Agent:** Claude Code CLI on host
+- Uses existing `/new` skill workflow
+- Full host system access (git, npm, pytest, etc.)
 
 ## Implementation Roadmap
 
-See [FEATURES.md](FEATURES.md) for detailed feature breakdown, engine mapping, dependencies, and status tracking.
+See [FEATURES.md](FEATURES.md) for detailed feature breakdown.
+
+**Phase 0 (MVP):** UI + Backend + `/new` integration
+- Mobile interface for feature submission
+- Session management and monitoring
+- PTY-based agent execution on host
+- One feature at a time, simple queue
+
+**Phase 1+ (Future):** Enhancements
+- Multiple concurrent sessions (if needed)
+- Scheduled features (cron-triggered `/new`)
+- Notifications/inbox
+- Advanced monitoring
+
+## Strategic Value
+
+Cockpit makes autonomous development **accessible from anywhere**.
+
+- Submit features while walking the dog
+- Monitor progress from your phone
+- Review PRs on mobile
+- Merge when ready
+
+**The innovation isn't in execution (Claude Code already handles that). The innovation is in remote accessibility and mobile UX.**
+
+## Current Status
+
+**In Progress:**
+- ✅ Documentation restructure (this file + FEATURES.md)
+- 🔄 Phase 0 implementation next
+  - Logo integration (chicken branding)
+  - Mobile-friendly navigation
+  - Host-based agent execution
+  - Feature submission UI
+
+---
+
+**Next:** Build Phase 0 to enable remote feature submission from iPhone.
