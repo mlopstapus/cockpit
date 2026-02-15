@@ -1,11 +1,11 @@
 # Sync
 
-Sync the current branch with main. Pull latest main, rebase, and resolve any conflicts. Run autonomously — read the code, understand both sides, and resolve. Only stop and ask if a conflict is genuinely ambiguous (e.g. one side deletes something the other side modified).
+Sync the current branch with main. Pull latest main, rebase, and resolve any conflicts. This is meant to run autonomously — read the code, understand both sides, and resolve. Only stop and ask if a conflict is genuinely ambiguous (e.g. one side deletes something the other side modified).
 
 ## Steps
 
 1. **Check state** — Run `git status` and `git branch`. Confirm you are NOT on `main`. If there are uncommitted changes, stash them: `git stash`.
-2. **Check for stuck rebase** — Run `git status` for signs of an in-progress rebase. If one is stuck, abort it first: `git rebase --abort`.
+2. **Check for stuck rebase** — Run `git rebase --show-current-patch` or check `git status` for signs of an in-progress rebase. If one is stuck, abort it first: `git rebase --abort`.
 3. **Fetch main** — Run `git fetch origin main`.
 4. **Rebase** — Run `git rebase origin/main`.
 5. **Resolve conflicts** — If conflicts appear, for each conflicted file:
@@ -16,7 +16,7 @@ Sync the current branch with main. Pull latest main, rebase, and resolve any con
    - Repeat until the rebase completes.
 6. **Verify** — Run `git log --oneline -5` to confirm the rebased history looks clean. Run `git status` to confirm a clean working tree.
 7. **Restore stash** — If you stashed in step 1, run `git stash pop`. Resolve any conflicts from the pop the same way.
-8. **Push** — If the branch has a remote tracking branch (`git branch -vv`), run `git push --force-with-lease`. If the branch has never been pushed, skip this — the next `/commit` will handle the initial push.
+8. **Push** — If the branch has a remote (`git remote -v` and check for a tracking branch with `git branch -vv`), run `git push --force-with-lease`. If the branch has never been pushed, skip this — the next `/finish` will handle the initial push.
 
 ## Conflict resolution guidelines
 
