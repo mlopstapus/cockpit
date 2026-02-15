@@ -31,15 +31,34 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 
 ## Phase 0: MVP (All Tasks)
 
-### Task 1 — Chicken Logo Integration
-- Generate all icon sizes from `frontend/public/chicken-logo.png`
-  - Favicon: 16x16, 32x32 (ICO format)
-  - Apple Touch Icon: 180x180 PNG
-  - PWA Icons: 192x192, 512x512 PNG (standard + maskable)
-- Update `frontend/public/manifest.json` with new icon paths
-- Update `frontend/index.html` with favicon and apple-touch-icon links
-- Add chicken logo to UI (welcome screen, header/nav branding)
-- Files: `frontend/public/` (icons), `frontend/public/manifest.json`, `frontend/index.html`, `frontend/src/components/`
+### Task 1 — Chicken Logo Format Generation
+- **Source:** `frontend/public/chicken-logo.png` (orange chicken illustration)
+- **Generate all required formats:**
+  - **Favicon:**
+    - 16x16 PNG → `favicon-16.png`
+    - 32x32 PNG → `favicon-32.png`
+    - Combine into `favicon.ico` (multi-resolution ICO file)
+  - **Apple Touch Icon:**
+    - 180x180 PNG → `apple-touch-icon.png` (rounded corners, solid background)
+  - **PWA Icons:**
+    - 192x192 PNG → `icon-192.png` (standard)
+    - 512x512 PNG → `icon-512.png` (standard)
+    - 192x192 PNG → `icon-192-maskable.png` (with safe zone padding)
+    - 512x512 PNG → `icon-512-maskable.png` (with safe zone padding)
+- **Tools:** Use ImageMagick or Python (Pillow) to resize and convert:
+  ```bash
+  # Example with ImageMagick
+  convert chicken-logo.png -resize 16x16 favicon-16.png
+  convert chicken-logo.png -resize 32x32 favicon-32.png
+  convert favicon-16.png favicon-32.png favicon.ico
+  convert chicken-logo.png -resize 180x180 apple-touch-icon.png
+  # etc.
+  ```
+- **Maskable icons:** Add 20% padding (safe zone) to prevent cropping on Android
+- Update `frontend/public/manifest.json` with new icon paths and purpose ("any" vs "maskable")
+- Update `frontend/index.html` with `<link>` tags for favicon and apple-touch-icon
+- Add chicken logo to UI components (welcome screen, header/nav branding)
+- Files: `frontend/public/` (all icon files), `frontend/public/manifest.json`, `frontend/index.html`, `frontend/src/components/Welcome/WelcomeScreen.tsx`
 
 ### Task 2 — Mobile-Friendly Navigation
 - **Problem:** Bottom nav has poor iPhone UX (home indicator conflicts, thumb zones)
@@ -52,7 +71,28 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Test on iPhone Safari: tap targets, scrolling, gestures
 - Files: `frontend/src/components/Layout/BottomNav.tsx` (delete), `frontend/src/components/Layout/MobileNav.tsx` (new), `frontend/src/components/Layout/AppShell.tsx`
 
-### Task 3 — Database Schema
+### Task 3 — Dynamic Workspace Discovery (Replace Hardcoded Repos)
+- **Problem:** Repos currently hardcoded in `backend/config.py` (opero, laddr, smartr)
+- **Solution:** Dynamically discover projects from host directory
+- **Implementation:**
+  - Remove hardcoded `repos` list from `backend/config.py`
+  - Add `repos_root` setting (default: `~/repos` or configurable via env var)
+  - Create `/api/workspaces/discover` endpoint:
+    - Scan `repos_root` directory on host
+    - For each subdirectory, check if it's a git repo (`git rev-parse --git-dir`)
+    - Return list of discovered repos with metadata:
+      - `name`: directory name
+      - `path`: full path
+      - `is_git_repo`: boolean
+      - `default_branch`: detect from `git symbolic-ref refs/remotes/origin/HEAD` or fallback to "main"
+      - `has_docker_compose`: check for `docker-compose.yml`
+  - Update `/api/projects` POST endpoint to accept `repo_path` from discovery results
+  - Frontend: Add "Browse Workspaces" button → shows discovered repos → user selects one to create project
+- **Host-based execution:** Since agents run on host (not Docker), use direct filesystem access
+- **Migration:** On startup, if `projects` table is empty and old hardcoded repos exist in config, auto-create projects from them (one-time migration)
+- Files: `backend/config.py` (remove hardcoded repos), `backend/routers/workspaces.py` (new), `backend/services/workspace_discovery.py` (new), `frontend/src/components/Workspaces/WorkspaceBrowser.tsx` (new)
+
+### Task 4 — Database Schema
 - Create `projects` table:
   - Columns: `id`, `name`, `description`, `repo_path`, `color`, `created_at`, `updated_at`
 - Create `sessions` table:
@@ -60,7 +100,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Migration scripts for PostgreSQL
 - Files: `backend/db/migrations/`, `backend/models.py`
 
-### Task 4 — Projects API
+### Task 5 — Projects API
 - CRUD endpoints for projects:
   - `GET /api/projects` — list all projects
   - `POST /api/projects` — create project (name, description, repo_path, color)
@@ -69,7 +109,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
   - `DELETE /api/projects/{id}` — delete project
 - Files: `backend/routers/projects.py` (new), `backend/main.py`
 
-### Task 5 — Sessions API
+### Task 6 — Sessions API
 - Endpoints for session management:
   - `POST /api/sessions` — create session (project_id, feature_description) → adds to queue
   - `GET /api/sessions` — list all sessions (with filters: project_id, status)
@@ -78,7 +118,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
   - `POST /api/sessions/{id}/restart` — restart failed session
 - Files: `backend/routers/sessions.py` (new), `backend/main.py`
 
-### Task 6 — Host-Based Agent Execution
+### Task 7 — Host-Based Agent Execution
 - **Critical:** Agents must run on host machine (not Docker) to access git, npm, pytest, etc.
 - Implement PTY-based execution:
   - Spawn Claude CLI on host: `claude code --new "<feature_description>"`
@@ -88,7 +128,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Handle PTY lifecycle: spawn, monitor, cleanup on crash
 - Files: `backend/services/agent_executor.py` (new), `backend/services/pty_manager.py` (new)
 
-### Task 7 — Simple Queue Worker
+### Task 8 — Simple Queue Worker
 - Background worker that:
   - Polls `sessions` table for `status = 'queued'`
   - Executes one session at a time (FIFO)
@@ -97,20 +137,24 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - No parallel execution for MVP (add later if needed)
 - Files: `backend/services/queue_worker.py` (new), `backend/main.py` (lifespan startup)
 
-### Task 8 — WebSocket Log Streaming
+### Task 9 — WebSocket Log Streaming
 - WebSocket endpoint: `ws://backend/api/sessions/{id}/logs`
 - Stream agent stdout/stderr in real-time to connected clients
 - Broadcast to all clients subscribed to a session
 - Implement WebSocket hub/manager
 - Files: `backend/ws/log_streamer.py` (new), `backend/ws/hub.py` (new), `backend/main.py`
 
-### Task 9 — Frontend: Projects UI
+### Task 10 — Frontend: Projects UI with Workspace Browser
 - Project list view: shows all projects with colored tags
-- Create project form: name, description, repo path, color picker
+- Create project form with workspace browser:
+  - "Browse Workspaces" button → calls `/api/workspaces/discover`
+  - Shows discovered repos from host directory
+  - User selects repo → auto-fills `repo_path`
+  - Manual fields: name (pre-filled from repo name), description, color picker
 - Project detail view: shows associated sessions
-- Files: `frontend/src/components/Projects/ProjectList.tsx`, `frontend/src/components/Projects/ProjectForm.tsx`, `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`
+- Files: `frontend/src/components/Projects/ProjectList.tsx`, `frontend/src/components/Projects/ProjectForm.tsx`, `frontend/src/components/Workspaces/WorkspaceBrowser.tsx` (new), `frontend/src/types/index.ts`, `frontend/src/lib/api.ts`
 
-### Task 10 — Frontend: Feature Submission Form
+### Task 11 — Frontend: Feature Submission Form
 - Simple form with:
   - Project selector (dropdown)
   - Feature description (textarea, multiline)
@@ -119,7 +163,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Mobile-optimized: large tap targets, clear focus states
 - Files: `frontend/src/components/Features/SubmitForm.tsx`, `frontend/src/lib/api.ts`
 
-### Task 11 — Frontend: Session List View
+### Task 12 — Frontend: Session List View
 - List all sessions (filterable by project, status)
 - Each session card shows:
   - Feature description (truncated)
@@ -130,7 +174,7 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Pull-to-refresh on mobile
 - Files: `frontend/src/components/Sessions/SessionList.tsx`, `frontend/src/components/Sessions/SessionCard.tsx`
 
-### Task 12 — Frontend: Session Detail View
+### Task 13 — Frontend: Session Detail View
 - View single session:
   - Feature description (full)
   - Status + timestamps
@@ -141,33 +185,33 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 - Mobile-friendly log viewer (monospace, scrollable)
 - Files: `frontend/src/components/Sessions/SessionDetail.tsx`, `frontend/src/components/Sessions/LogViewer.tsx`
 
-### Task 13 — Frontend: Welcome Screen
+### Task 14 — Frontend: Welcome Screen
 - Empty state when no sessions exist
 - Chicken logo (large, centered)
 - "Submit your first feature request" CTA button
 - Links to: create project, submit feature
 - Files: `frontend/src/components/Welcome/WelcomeScreen.tsx`
 
-### Task 14 — Infrastructure: Host Execution Environment
+### Task 15 — Infrastructure: Host Execution Environment
 - Ensure Claude CLI installed on host (NUC)
 - Configure Claude API keys (environment variables or config file)
 - Set up git on host (user, email, SSH keys for GitHub)
 - Verify repo access (can clone/push)
 - Document setup steps in `docs/SETUP.md`
 
-### Task 15 — Infrastructure: Tailscale Networking
+### Task 16 — Infrastructure: Tailscale Networking
 - Backend accessible via Tailscale from iPhone
 - Test connectivity: `curl https://<tailscale-ip>/api/projects` from iPhone
 - Document Tailscale setup in `docs/SETUP.md`
 
-### Task 16 — PWA Configuration
+### Task 17 — PWA Configuration
 - Service worker for offline support
 - `manifest.json` with chicken logo icons
 - Add-to-home-screen prompt
 - Test on iPhone: install to home screen, launch, verify logo
 - Files: `frontend/public/sw.js`, `frontend/public/manifest.json`, `frontend/index.html`
 
-### Task 17 — End-to-End Testing
+### Task 18 — End-to-End Testing
 - Test full workflow from iPhone:
   1. Open Cockpit PWA
   2. Create project
@@ -228,8 +272,9 @@ Build mobile-first UI to submit feature requests from iPhone and monitor Claude 
 
 ## Next Steps
 
-1. Start with Task 1 (chicken logo) - quick win, sets branding
+1. Start with Task 1 (chicken logo formats) - quick win, sets branding
 2. Then Task 2 (mobile nav) - critical UX fix
-3. Then backend foundation (Tasks 3-8) - enable execution
-4. Then frontend UI (Tasks 9-13) - complete the loop
-5. Infrastructure & testing (Tasks 14-17) - deploy and validate
+3. Then Task 3 (dynamic workspace discovery) - replace hardcoded repos
+4. Then backend foundation (Tasks 4-9) - enable execution
+5. Then frontend UI (Tasks 10-14) - complete the loop
+6. Infrastructure & testing (Tasks 15-18) - deploy and validate
