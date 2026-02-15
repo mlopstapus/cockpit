@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
 
-    # Database (PostgreSQL via Docker Compose)
-    database_url: str = "postgresql://cockpit:cockpit-dev-password@localhost:5432/cockpit"
+    # Database - SQLite for MVP (can be switched to PostgreSQL for production)
+    # Use DATABASE_URL env var to override (e.g., "postgresql+asyncpg://user:pass@host/db")
+    database_url: str = "sqlite+aiosqlite:///./cockpit.db"
 
     # Claude profiles directory
     profiles_dir: str = "~/.claude-profiles"

@@ -17,6 +17,7 @@ from routers.sessions import router as sessions_router
 from routers.repos import repos_router, accounts_router
 from routers.projects import router as projects_router
 from routers.workspaces import router as workspaces_router
+from db import init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +84,11 @@ def _get_project_color(index: int) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
+    # Initialize database
+    logger.info("Initializing database...")
+    await init_db()
+    logger.info("✓ Database initialized")
+
     # Initialize services
     account_rotator = AccountRotator()
     session_manager = SessionManager(account_rotator)
@@ -92,7 +98,7 @@ async def lifespan(app: FastAPI):
     app.state.account_rotator = account_rotator
     app.state.session_manager = session_manager
     app.state.ws_hub = ws_hub
-    app.state.projects = {}  # In-memory project store (DB migration later)
+    app.state.projects = {}  # In-memory project store (TODO: migrate to DB fully)
 
     # Auto-discover and create projects on first startup
     if not app.state.projects:
