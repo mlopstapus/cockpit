@@ -27,6 +27,6 @@ Sync the current branch with main. Pull latest main, rebase, and resolve any con
 - **Never silently drop code from either side.** If unsure, ask.
 
 ## Rules
-- Never run this on `main`.
+- Never run this on `main`. If you're on main, suggest: "Create a feature branch first with `git checkout -b feature/<name>`"
 - Always use `--force-with-lease`, never bare `--force`. It fails safely if someone else pushed to the branch.
 - If something goes sideways mid-rebase, abort cleanly with `git rebase --abort` and report back.

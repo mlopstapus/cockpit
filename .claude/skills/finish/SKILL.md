@@ -21,6 +21,7 @@ Run after `/new` or `/continue` completes and PLAN.md status is ✅ Ready to Shi
 ## Steps
 
 ### 1. Verify ready to ship
+- **CRITICAL:** Ensure you're in project root (run `pwd` and verify, navigate if needed)
 - Check PLAN.md status must be ✅ Ready to Ship
 - If not: "Run `/continue` to complete implementation"
 
@@ -38,6 +39,10 @@ Run after `/new` or `/continue` completes and PLAN.md status is ✅ Ready to Shi
 - Show summary to user
 
 ### 4. Commit + Push + PR
+**First, check if changes are already committed:**
+- Run `git status` to check for uncommitted changes
+- If working tree is clean: Skip to push step (commit already exists)
+- If changes exist: Create commit as shown below
 Summarize changes in plain English, then:
 
 **IMPORTANT:** Run git commands from project root (check with `pwd`, use `cd /path/to/project` if needed)
