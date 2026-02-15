@@ -33,6 +33,8 @@ class CreateSessionRequest(BaseModel):
     project_id: str
     name: str | None = None  # Auto-generated if not provided
     account_id: str | None = None  # Auto-selected if not provided
+    feature_description: str | None = None  # If provided, auto-triggers /new workflow
+    auto_execute: bool = True  # If True with feature_description, starts /new immediately
 
 
 class SendMessageRequest(BaseModel):
