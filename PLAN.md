@@ -1,9 +1,12 @@
 # Plan: Cockpit MVP - Mobile Feature Submission
 
-**Status:** ✅ Ready to Ship
+**Status:** 🚢 Shipped
 **Created:** 2026-02-15
 **Started:** 2026-02-15
 **Completed:** 2026-02-15
+**Shipped:** 2026-02-15
+**PR:** https://github.com/mlopstapus/cockpit/pull/4
+**Commit:** c974315
 **Architecture:** Simplified - Use `/new` skill workflow, not DAG execution
 
 ## Goal
