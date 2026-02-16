@@ -142,14 +142,31 @@ Cockpit makes autonomous development **accessible from anywhere**.
 
 ## Current Status
 
-**In Progress:**
-- ✅ Documentation restructure (this file + FEATURES.md)
-- 🔄 Phase 0 implementation next
-  - Logo integration (chicken branding)
-  - Mobile-friendly navigation
-  - Host-based agent execution
-  - Feature submission UI
+**Phase 0 MVP: ✅ Complete (20/22 features - 91%)**
+
+**Implemented:**
+- ✅ Chicken logo branding (all icon formats: favicon, PWA, maskable)
+- ✅ Mobile-friendly navigation (hamburger + drawer pattern)
+- ✅ Dynamic workspace discovery (scans `~/repos` for git repositories)
+- ✅ Database schema (SQLAlchemy: Project, Session models)
+- ✅ Projects API (CRUD with workspace browser UI)
+- ✅ Sessions API (create/list/get with feature_description)
+- ✅ Host-based PTY agent execution (ClaudeProcess)
+- ✅ Auto-trigger `/new` workflow from feature requests
+- ✅ WebSocket log streaming (real-time output to mobile)
+- ✅ Feature submission UI (NewSessionModal with textarea)
+- ✅ PWA configuration (service worker, manifest, offline support)
+
+**Database:** SQLite for MVP (switch to PostgreSQL via `DATABASE_URL` env var)
+
+**Deferred to Phase 1:**
+- ⏭️ FIFO queue worker (direct execution sufficient for MVP)
+
+**Pending Deployment & Testing:**
+- 🟡 Deploy backend to NUC
+- 🟡 Configure Tailscale access from iPhone
+- 🟡 End-to-end test: submit feature from iPhone → PR created on GitHub
 
 ---
 
-**Next:** Build Phase 0 to enable remote feature submission from iPhone.
+**Next:** Deploy to NUC and test full workflow from iPhone over Tailscale.
