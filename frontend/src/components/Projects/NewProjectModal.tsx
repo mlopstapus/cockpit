@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Folder, ChevronUp, GitBranch, ChevronRight } from "lucide-react";
+import { X, Folder, ChevronUp, GitBranch, ChevronRight, Zap } from "lucide-react";
 import { api } from "../../lib/api";
 import type { ProjectInfo } from "../../types";
 
@@ -13,6 +13,14 @@ interface BrowseResult {
   parent: string | null;
   is_git_repo: boolean;
   directories: Array<{ name: string; path: string; is_git_repo: boolean }>;
+}
+
+interface WorkspaceInfo {
+  name: string;
+  path: string;
+  is_git_repo: boolean;
+  default_branch: string | null;
+  has_docker_compose: boolean;
 }
 
 interface NewProjectModalProps {
@@ -37,6 +45,12 @@ export default function NewProjectModal({
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<string | null>(null);
 
+  // Workspace discovery state
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  const [workspacesError, setWorkspacesError] = useState<string | null>(null);
+
   const browse = async (path?: string) => {
     setBrowseLoading(true);
     setBrowseError(null);
@@ -54,7 +68,26 @@ export default function NewProjectModal({
 
   const handleOpenBrowser = () => {
     setShowBrowser(true);
+    setShowWorkspaces(false);
     browse(); // Uses backend default (browse_root, typically /repos)
+  };
+
+  const handleDiscoverWorkspaces = async () => {
+    setShowWorkspaces(true);
+    setShowBrowser(false);
+    setWorkspacesLoading(true);
+    setWorkspacesError(null);
+
+    try {
+      const discovered = await api.discoverWorkspaces();
+      setWorkspaces(discovered);
+    } catch (err) {
+      setWorkspacesError(
+        err instanceof Error ? err.message : "Failed to discover workspaces"
+      );
+    } finally {
+      setWorkspacesLoading(false);
+    }
   };
 
   const handleSelectFolder = (path: string) => {
@@ -155,15 +188,71 @@ export default function NewProjectModal({
                 </button>
               </div>
             ) : (
-              <button
-                onClick={handleOpenBrowser}
-                className="w-full flex items-center gap-2 rounded-lg border border-dashed border-gray-600 bg-gray-800/50 px-3 py-3 text-sm text-gray-400 hover:border-gray-500 hover:text-gray-300 transition-colors"
-              >
-                <Folder size={16} />
-                Browse folders on host...
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={handleDiscoverWorkspaces}
+                  className="w-full flex items-center gap-2 rounded-lg border border-dashed border-accent/40 bg-accent/5 px-3 py-3 text-sm text-accent hover:border-accent/60 hover:bg-accent/10 transition-colors"
+                >
+                  <Zap size={16} />
+                  Discover Git Repositories
+                </button>
+                <button
+                  onClick={handleOpenBrowser}
+                  className="w-full flex items-center gap-2 rounded-lg border border-dashed border-gray-600 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-400 hover:border-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  <Folder size={15} />
+                  Browse manually...
+                </button>
+              </div>
             )}
           </div>
+
+          {/* Quick workspace discovery */}
+          {showWorkspaces && (
+            <div className="rounded-lg border border-gray-700 bg-gray-900 overflow-hidden">
+              <div className="border-b border-gray-700 px-3 py-2 bg-gray-800/50">
+                <span className="text-xs text-gray-400 font-medium">
+                  Discovered Git Repositories
+                </span>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {workspacesLoading ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-gray-500">
+                    Discovering workspaces...
+                  </div>
+                ) : workspacesError ? (
+                  <div className="px-3 py-4 text-sm text-red-400">
+                    {workspacesError}
+                  </div>
+                ) : workspaces.length === 0 ? (
+                  <div className="px-3 py-6 text-sm text-gray-500 text-center">
+                    No git repositories found in workspace directory
+                  </div>
+                ) : (
+                  workspaces.map((ws) => (
+                    <button
+                      key={ws.path}
+                      onClick={() => handleSelectFolder(ws.path)}
+                      className="flex w-full items-start gap-3 px-3 py-3 text-sm hover:bg-gray-800 transition-colors border-b border-gray-800/50 last:border-0"
+                    >
+                      <GitBranch size={16} className="text-green-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-gray-200 font-medium truncate">{ws.name}</p>
+                        <p className="text-xs text-gray-500 truncate font-mono">{ws.path}</p>
+                        {ws.default_branch && (
+                          <p className="text-xs text-gray-600 mt-1">
+                            Branch: {ws.default_branch}
+                            {ws.has_docker_compose && " • Docker Compose"}
+                          </p>
+                        )}
+                      </div>
+                      <ChevronRight size={14} className="text-gray-600 flex-shrink-0 mt-0.5" />
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Inline folder browser */}
           {showBrowser && (

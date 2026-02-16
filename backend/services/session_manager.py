@@ -1,4 +1,5 @@
 """Manages multiple Claude Code sessions."""
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -24,8 +25,19 @@ class SessionManager:
         project: dict,
         name: str | None = None,
         account_id: str | None = None,
+        feature_description: str | None = None,
+        auto_execute: bool = True,
     ) -> SessionInfo:
-        """Create and start a new Claude Code session for a project."""
+        """Create and start a new Claude Code session for a project.
+
+        Args:
+            project_id: Project identifier
+            project: Project dict with name, repo_path, etc.
+            name: Session name (auto-generated if not provided)
+            account_id: Specific account to use (auto-selected if not provided)
+            feature_description: Feature to build (triggers /new workflow if provided)
+            auto_execute: If True with feature_description, auto-sends /new command
+        """
         # Check concurrent session limit
         active = sum(1 for s in self.sessions.values() if s["status"] == SessionStatus.RUNNING)
         if active >= settings.max_concurrent_sessions:
@@ -66,6 +78,7 @@ class SessionManager:
             "created_at": now,
             "last_activity": now,
             "message_count": 0,
+            "feature_description": feature_description,
         }
 
         # Start the process
@@ -74,6 +87,14 @@ class SessionManager:
             self.sessions[session_id]["status"] = SessionStatus.RUNNING
             self.account_rotator.increment_usage(account.id)
             logger.info(f"Session {session_id} started: {session_name}")
+
+            # Auto-trigger /new workflow if feature description provided
+            if feature_description and auto_execute:
+                await asyncio.sleep(2)  # Wait for Claude to be ready
+                new_command = f"/new {feature_description}"
+                await self.send_message(session_id, new_command)
+                logger.info(f"Auto-triggered /new workflow for session {session_id}")
+
         except Exception as e:
             self.sessions[session_id]["status"] = SessionStatus.ERROR
             logger.error(f"Failed to start session {session_id}: {e}")

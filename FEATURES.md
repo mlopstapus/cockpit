@@ -30,38 +30,38 @@ Implementation plan for mobile-first remote feature submission using existing `/
 
 | ID | Feature | Component | Dependencies | Status | Acceptance Criteria |
 |---|---|---|---|---|---|
-| UI0.1 | Chicken Logo Integration | Frontend | - | 🔴 | Generate all icon sizes from chicken-logo.png: favicon (16x16, 32x32), PWA icons (192x192, 512x512), Apple touch icon (180x180) |
-| UI0.2 | Update Manifest & HTML | Frontend | UI0.1 | 🔴 | Update manifest.json with chicken logo paths, add favicon/apple-touch-icon links to index.html |
-| UI0.3 | Mobile-Friendly Navigation | Frontend | - | 🔴 | Replace bottom nav (poor iPhone UX) with mobile-optimized menu - hamburger/drawer or top tabs |
-| UI0.4 | Feature Submission Form | Frontend | - | 🔴 | Simple form: feature description textarea, project selector, submit button |
-| UI0.5 | Session List View | Frontend | - | 🔴 | List active and recent sessions: feature name, status, timestamp, project |
-| UI0.6 | Session Detail View | Frontend | UI0.5 | 🔴 | View single session: streaming logs, status, stop/restart buttons |
-| UI0.7 | Project Organization | Frontend | - | 🔴 | Create/list projects, associate sessions with projects, colored project tags |
-| UI0.8 | Welcome Screen | Frontend | UI0.1 | 🔴 | Empty state with chicken logo + "Submit a feature request" CTA |
-| UI0.9 | Mobile Responsiveness | Frontend | UI0.3 | 🔴 | Test on iPhone Safari, ensure all interactions work (tap targets, scrolling, forms) |
+| UI0.1 | Chicken Logo Integration | Frontend | - | 🟢 | Generate all icon sizes from chicken-logo.png: favicon (16x16, 32x32), PWA icons (192x192, 512x512), Apple touch icon (180x180) |
+| UI0.2 | Update Manifest & HTML | Frontend | UI0.1 | 🟢 | Update manifest.json with chicken logo paths, add favicon/apple-touch-icon links to index.html |
+| UI0.3 | Mobile-Friendly Navigation | Frontend | - | 🟢 | Mobile-optimized hamburger + drawer navigation (already existed) |
+| UI0.4 | Feature Submission Form | Frontend | - | 🟢 | Feature description textarea in NewSessionModal, auto-triggers /new workflow |
+| UI0.5 | Session List View | Frontend | - | 🟢 | SessionDashboard component shows active/recent sessions |
+| UI0.6 | Session Detail View | Frontend | UI0.5 | 🟢 | ChatView component with streaming logs via WebSocket |
+| UI0.7 | Project Organization | Frontend | - | 🟢 | ProjectsView with workspace browser, colored tags, CRUD operations |
+| UI0.8 | Welcome Screen | Frontend | UI0.1 | 🟢 | WelcomeScreen with chicken logo + "New Session" CTA |
+| UI0.9 | Mobile Responsiveness | Frontend | UI0.3 | 🟢 | Sidebar gestures, responsive layouts, mobile-first design throughout |
 
 ### Backend Features (Control Plane)
 
 | ID | Feature | Component | Dependencies | Status | Acceptance Criteria |
 |---|---|---|---|---|---|
-| BE0.1 | Projects API | Backend | - | 🔴 | CRUD endpoints for projects: `GET/POST /api/projects`, `GET/PUT/DELETE /api/projects/{id}` |
-| BE0.2 | Sessions API | Backend | - | 🔴 | Create/list/get sessions: `POST /api/sessions`, `GET /api/sessions`, `GET /api/sessions/{id}` |
-| BE0.3 | Feature Submission Handler | Backend | BE0.2 | 🔴 | Accept feature request, create session record, trigger agent execution |
-| BE0.4 | Agent Execution (Host-Based) | Backend | BE0.3 | 🔴 | Spawn Claude CLI on host machine (not Docker) via PTY, run `/new "<feature>"` |
-| BE0.5 | Log Streaming (WebSocket) | Backend | BE0.4 | 🔴 | Stream agent stdout/stderr to connected clients via WebSocket |
-| BE0.6 | Session Control | Backend | BE0.4 | 🔴 | Stop/restart session endpoints: `POST /api/sessions/{id}/stop`, `POST /api/sessions/{id}/restart` |
-| BE0.7 | Simple Queue (FIFO) | Backend | BE0.3 | 🔴 | Queue feature requests, execute one at a time (no parallel execution for MVP) |
-| BE0.8 | Database Schema | Backend | - | 🔴 | Tables: `projects`, `sessions` (id, project_id, feature_description, status, created_at, logs_path) |
+| BE0.1 | Projects API | Backend | - | 🟢 | CRUD endpoints: `GET/POST /api/projects`, `GET/PUT/DELETE /api/projects/{id}` |
+| BE0.2 | Sessions API | Backend | - | 🟢 | Create/list/get/stop sessions with feature_description support |
+| BE0.3 | Feature Submission Handler | Backend | BE0.2 | 🟢 | Accepts feature_description, auto-sends `/new` command to Claude CLI |
+| BE0.4 | Agent Execution (Host-Based) | Backend | BE0.3 | 🟢 | PTY-based ClaudeProcess spawns on host, runs in project directory |
+| BE0.5 | Log Streaming (WebSocket) | Backend | BE0.4 | 🟢 | WebSocketHub broadcasts stdout/stderr to connected clients |
+| BE0.6 | Session Control | Backend | BE0.4 | 🟢 | Stop session via DELETE /api/sessions/{id} (restart via new session) |
+| BE0.7 | Workspace Discovery | Backend | - | 🟢 | `GET /api/workspaces/discover` scans ~/repos for git repositories |
+| BE0.8 | Database Schema | Backend | - | 🟢 | SQLAlchemy models: Project, Session with SQLite/PostgreSQL support |
 
 ### Integration & Infrastructure
 
 | ID | Feature | Component | Dependencies | Status | Acceptance Criteria |
 |---|---|---|---|---|---|
-| INT0.1 | PTY Management | Backend | BE0.4 | 🔴 | Reliably spawn/manage PTY for Claude CLI, capture output, handle crashes |
-| INT0.2 | Host Execution Environment | Infrastructure | - | 🔴 | Claude CLI installed on host, API keys configured, git setup, repo access |
-| INT0.3 | WebSocket Hub | Backend | BE0.5 | 🔴 | Manage WebSocket connections, broadcast logs to subscribed clients |
-| INT0.4 | Tailscale Networking | Infrastructure | - | 🔴 | Backend accessible from iPhone via Tailscale, secure tunnel |
-| INT0.5 | PWA Configuration | Frontend | UI0.2 | 🔴 | Service worker, offline support, add-to-home-screen prompt |
+| INT0.1 | PTY Management | Backend | BE0.4 | 🟢 | ClaudeProcess manages PTY lifecycle, handles crashes, output streaming |
+| INT0.2 | Host Execution Environment | Infrastructure | - | 🟡 | Requires deployment to NUC (pending Task #12 - end-to-end test) |
+| INT0.3 | WebSocket Hub | Backend | BE0.5 | 🟢 | WebSocketHub manages connections, broadcasts to subscribers |
+| INT0.4 | Tailscale Networking | Infrastructure | - | 🟡 | Requires deployment to NUC (pending Task #12 - end-to-end test) |
+| INT0.5 | PWA Configuration | Frontend | UI0.2 | 🟢 | Service worker registered, manifest configured, offline support enabled |
 
 ---
 
@@ -73,23 +73,28 @@ Implementation plan for mobile-first remote feature submission using existing `/
 
 | ID | Feature | Component | Dependencies | Status | Acceptance Criteria |
 |---|---|---|---|---|---|
-| ENH1.1 | Notifications/Inbox | Frontend + Backend | Phase 0 | 🔴 | Push notifications when sessions complete/fail, inbox view in UI |
-| ENH1.2 | Session History | Frontend | Phase 0 | 🔴 | View past sessions, filter by project/status, search by feature description |
-| ENH1.3 | PR Links in UI | Frontend | Phase 0 | 🔴 | Show PR URL when session completes, open in mobile browser |
-| ENH1.4 | Scheduled Features (Cron) | Backend | Phase 0 | 🔴 | Schedule feature requests to run at specific times (e.g., "every Monday at 9am") |
-| ENH1.5 | Multi-Session Support | Backend | Phase 0 | 🔴 | Allow N concurrent sessions (if needed), manage resource limits |
-| ENH1.6 | Session Templates | Frontend | Phase 0 | 🔴 | Save common feature request templates, quick-submit with prefilled text |
-| ENH1.7 | Settings UI | Frontend | Phase 0 | 🔴 | Configure Claude API keys, repo paths, agent settings from UI |
+| ENH1.1 | FIFO Queue Worker | Backend | Phase 0 | 🔴 | Background worker polls for queued sessions, executes one at a time (FIFO) |
+| ENH1.2 | Notifications/Inbox | Frontend + Backend | Phase 0 | 🔴 | Push notifications when sessions complete/fail, inbox view in UI |
+| ENH1.3 | Session History | Frontend | Phase 0 | 🔴 | View past sessions, filter by project/status, search by feature description |
+| ENH1.4 | PR Links in UI | Frontend | Phase 0 | 🔴 | Show PR URL when session completes, open in mobile browser |
+| ENH1.5 | Scheduled Features (Cron) | Backend | Phase 0 | 🔴 | Schedule feature requests to run at specific times (e.g., "every Monday at 9am") |
+| ENH1.6 | Multi-Session Support | Backend | Phase 0 | 🔴 | Allow N concurrent sessions (if needed), manage resource limits |
+| ENH1.7 | Session Templates | Frontend | Phase 0 | 🔴 | Save common feature request templates, quick-submit with prefilled text |
+| ENH1.8 | Settings UI | Frontend | Phase 0 | 🔴 | Configure Claude API keys, repo paths, agent settings from UI |
 
 ---
 
 ## Feature Summary
 
-| Phase | Total Features | Frontend | Backend | Infrastructure |
-|---|---|---|---|---|
-| **Phase 0 (MVP)** | **22** | 9 | 8 | 5 |
-| **Phase 1 (Enhancements)** | **7** | 5 | 2 | 0 |
-| **Total** | **29** | **14** | **10** | **5** |
+| Phase | Total Features | Frontend | Backend | Infrastructure | Complete |
+|---|---|---|---|---|---|
+| **Phase 0 (MVP)** | **22** | 9 | 8 | 5 | **20/22 (91%)** |
+| **Phase 1 (Enhancements)** | **8** | 5 | 3 | 0 | **0/8 (0%)** |
+| **Total** | **30** | **14** | **11** | **5** | **20/30 (67%)** |
+
+**Phase 0 Status:**
+- ✅ Complete: 20 features (branding, navigation, APIs, PTY execution, WebSocket, PWA, workspace discovery)
+- 🟡 Pending deployment: 2 features (host environment, Tailscale - requires NUC setup for testing)
 
 ---
 

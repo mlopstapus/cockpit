@@ -73,6 +73,8 @@ export interface CreateSessionRequest {
   project_id: string;
   name?: string;
   account_id?: string;
+  feature_description?: string;
+  auto_execute?: boolean;
 }
 
 export interface SendMessageRequest {

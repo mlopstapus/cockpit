@@ -16,6 +16,8 @@ from ws.hub import WebSocketHub
 from routers.sessions import router as sessions_router
 from routers.repos import repos_router, accounts_router
 from routers.projects import router as projects_router
+from routers.workspaces import router as workspaces_router
+from db import init_db
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,9 +26,69 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _auto_migrate_projects(app: FastAPI):
+    """Auto-discover workspaces and create projects on first startup."""
+    from pathlib import Path
+    import uuid
+    from datetime import datetime
+
+    repos_root = Path(settings.browse_root).expanduser().resolve()
+
+    # If browse_root doesn't exist, skip migration
+    if not repos_root.exists() or not repos_root.is_dir():
+        logger.warning(f"Repos root not found, skipping auto-migration: {repos_root}")
+        return
+
+    logger.info(f"Auto-discovering workspaces in: {repos_root}")
+
+    discovered_count = 0
+    for entry in sorted(repos_root.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+
+        # Only create projects for git repositories
+        if not (entry / ".git").exists():
+            continue
+
+        # Create project
+        project_id = str(uuid.uuid4())[:8]
+        now = datetime.now()
+
+        app.state.projects[project_id] = {
+            "id": project_id,
+            "name": entry.name,
+            "description": f"Auto-discovered from {repos_root}",
+            "repo_path": str(entry),
+            "color": _get_project_color(discovered_count),
+            "icon": "folder",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        discovered_count += 1
+        logger.info(f"   ✓ Created project: {entry.name}")
+
+    if discovered_count > 0:
+        logger.info(f"Auto-migrated {discovered_count} project(s) from workspace discovery")
+
+
+def _get_project_color(index: int) -> str:
+    """Get a color for a project based on its index."""
+    colors = [
+        "#ef4444", "#f97316", "#eab308", "#22c55e",
+        "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+    ]
+    return colors[index % len(colors)]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
+    # Initialize database
+    logger.info("Initializing database...")
+    await init_db()
+    logger.info("✓ Database initialized")
+
     # Initialize services
     account_rotator = AccountRotator()
     session_manager = SessionManager(account_rotator)
@@ -36,11 +98,15 @@ async def lifespan(app: FastAPI):
     app.state.account_rotator = account_rotator
     app.state.session_manager = session_manager
     app.state.ws_hub = ws_hub
-    app.state.projects = {}  # In-memory project store (DB migration later)
+    app.state.projects = {}  # In-memory project store (TODO: migrate to DB fully)
+
+    # Auto-discover and create projects on first startup
+    if not app.state.projects:
+        await _auto_migrate_projects(app)
 
     logger.info("🚀 Claude Cockpit started")
-    logger.info(f"   Repos: {[r.name for r in settings.repos]}")
     logger.info(f"   Accounts: {[a.id for a in settings.accounts]}")
+    logger.info(f"   Projects: {len(app.state.projects)}")
 
     yield
 
@@ -74,6 +140,7 @@ app.include_router(sessions_router)
 app.include_router(repos_router)
 app.include_router(accounts_router)
 app.include_router(projects_router)
+app.include_router(workspaces_router)
 
 
 # WebSocket endpoint for session streaming

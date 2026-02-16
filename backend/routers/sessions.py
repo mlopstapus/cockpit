@@ -41,6 +41,8 @@ async def create_session(request: Request, body: CreateSessionRequest):
             project=project,
             name=body.name,
             account_id=body.account_id,
+            feature_description=body.feature_description,
+            auto_execute=body.auto_execute,
         )
 
         # Start streaming output to WebSocket clients
