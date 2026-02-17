@@ -33,9 +33,10 @@ COPY --from=builder /app/dist ./dist
 # Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:3000/ || exit 1
+# Health check - use node's built-in fetch (available in Node 20+)
+# BusyBox wget on Alpine doesn't support --tries flag
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "fetch('http://localhost:3000/').then(r=>{if(!r.ok)throw r;process.exit(0)}).catch(()=>process.exit(1))"
 
 # Serve static files - SPA fallback to /index.html
 CMD ["http-server", "dist", "-p", "3000", "-g"]
