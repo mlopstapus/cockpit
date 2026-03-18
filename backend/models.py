@@ -55,6 +55,29 @@ class Job(BaseModel):
     error: str | None = None
 
 
+class ActivePR(BaseModel):
+    """A PR being watched for post-implementation review comments."""
+    job_id: str               # originating pipeline job
+    github_repo: str          # "owner/repo"
+    pr_number: int
+    issue_number: int
+    repo_path: str
+    registered_at: datetime
+
+
+class PRReviewJob(BaseModel):
+    """A single PR comment to be addressed by Claude."""
+    id: str
+    github_repo: str
+    pr_number: int
+    issue_number: int
+    repo_path: str
+    comment_id: str
+    comment_body: str
+    pr_url: str
+    created_at: datetime
+
+
 class JobSummary(BaseModel):
     """Lightweight job info for list endpoints."""
     id: str

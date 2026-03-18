@@ -15,6 +15,8 @@ from services.github_watcher import GithubWatcher
 from services.job_store import JobStore
 from services.pipeline_runner import PipelineRunner
 from services.pr_commenter import PRCommenter
+from services.pr_review_runner import PRReviewRunner
+from services.pr_review_watcher import PRReviewWatcher
 from ws.hub import WebSocketHub
 from routers.jobs import router as jobs_router
 
@@ -43,6 +45,12 @@ async def lifespan(app: FastAPI):
         comment_relay=comment_relay,
     )
     github_watcher = GithubWatcher(job_store)
+    pr_review_runner = PRReviewRunner(
+        job_store=job_store,
+        account_rotator=account_rotator,
+        pr_commenter=pr_commenter,
+    )
+    pr_review_watcher = PRReviewWatcher(job_store, pr_commenter)
 
     app.state.job_store = job_store
     app.state.account_rotator = account_rotator
@@ -51,6 +59,8 @@ async def lifespan(app: FastAPI):
 
     await pipeline_runner.start()
     await github_watcher.start()
+    await pr_review_runner.start()
+    await pr_review_watcher.start()
 
     logger.info("🚀 Claude Cockpit ready")
     logger.info(f"   Watching repos: {settings.github_repos}")
@@ -61,6 +71,8 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
     logger.info("Shutting down...")
+    await pr_review_watcher.stop()
+    await pr_review_runner.stop()
     await github_watcher.stop()
     await pipeline_runner.stop()
     await pr_commenter.close()

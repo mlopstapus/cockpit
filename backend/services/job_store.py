@@ -7,7 +7,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
-from models import Job, JobStage, JobStatus, JobSummary
+from models import ActivePR, Job, JobStage, JobStatus, JobSummary, PRReviewJob
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,96 @@ class JobStore:
             if j:
                 jobs.append(j)
         return jobs
+
+    # ── Active PR watch ────────────────────────────────────────────────────────
+
+    def _pr_key(self, github_repo: str, pr_number: int) -> str:
+        return f"pr:{github_repo}:{pr_number}"
+
+    def _pr_seen_key(self, github_repo: str, pr_number: int) -> str:
+        return f"pr:{github_repo}:{pr_number}:seen_comments"
+
+    async def register_active_pr(self, pr: ActivePR) -> None:
+        key = self._pr_key(pr.github_repo, pr.pr_number)
+        await self._redis.hset(key, mapping={
+            "job_id": pr.job_id,
+            "github_repo": pr.github_repo,
+            "pr_number": str(pr.pr_number),
+            "issue_number": str(pr.issue_number),
+            "repo_path": pr.repo_path,
+            "registered_at": pr.registered_at.isoformat(),
+        })
+        await self._redis.sadd("prs:active", f"{pr.github_repo}:{pr.pr_number}")
+
+    async def get_active_pr(self, github_repo: str, pr_number: int) -> ActivePR | None:
+        data = await self._redis.hgetall(self._pr_key(github_repo, pr_number))
+        if not data:
+            return None
+        return ActivePR(
+            job_id=data["job_id"],
+            github_repo=data["github_repo"],
+            pr_number=int(data["pr_number"]),
+            issue_number=int(data["issue_number"]),
+            repo_path=data["repo_path"],
+            registered_at=datetime.fromisoformat(data["registered_at"]),
+        )
+
+    async def list_active_prs(self) -> list[ActivePR]:
+        members = await self._redis.smembers("prs:active")
+        prs = []
+        for member in members:
+            repo, pr_num = member.rsplit(":", 1)
+            pr = await self.get_active_pr(repo, int(pr_num))
+            if pr:
+                prs.append(pr)
+        return prs
+
+    async def deregister_pr(self, github_repo: str, pr_number: int) -> None:
+        await self._redis.delete(self._pr_key(github_repo, pr_number))
+        await self._redis.srem("prs:active", f"{github_repo}:{pr_number}")
+
+    async def is_pr_comment_seen(self, github_repo: str, pr_number: int, comment_id: str) -> bool:
+        return await self._redis.sismember(self._pr_seen_key(github_repo, pr_number), comment_id)
+
+    async def mark_pr_comment_seen(self, github_repo: str, pr_number: int, comment_id: str) -> None:
+        await self._redis.sadd(self._pr_seen_key(github_repo, pr_number), comment_id)
+
+    # ── PR review job queue ─────────────────────────────────────────────────────
+
+    async def enqueue_pr_review(self, job: PRReviewJob) -> None:
+        key = f"pr_review:{job.id}"
+        await self._redis.hset(key, mapping={
+            "id": job.id,
+            "github_repo": job.github_repo,
+            "pr_number": str(job.pr_number),
+            "issue_number": str(job.issue_number),
+            "repo_path": job.repo_path,
+            "comment_id": job.comment_id,
+            "comment_body": job.comment_body,
+            "pr_url": job.pr_url,
+            "created_at": job.created_at.isoformat(),
+        })
+        await self._redis.rpush("pr_review:queue", job.id)
+
+    async def dequeue_pr_review(self, timeout: int = 5) -> PRReviewJob | None:
+        result = await self._redis.blpop("pr_review:queue", timeout=timeout)
+        if not result:
+            return None
+        _, job_id = result
+        data = await self._redis.hgetall(f"pr_review:{job_id}")
+        if not data:
+            return None
+        return PRReviewJob(
+            id=data["id"],
+            github_repo=data["github_repo"],
+            pr_number=int(data["pr_number"]),
+            issue_number=int(data["issue_number"]),
+            repo_path=data["repo_path"],
+            comment_id=data["comment_id"],
+            comment_body=data["comment_body"],
+            pr_url=data["pr_url"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+        )
 
     # ── Serialization helpers ──────────────────────────────────────────────────
 

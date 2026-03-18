@@ -80,6 +80,15 @@ class PRCommenter:
         body = f"❌ **Pipeline failed** at **{stage}**: {clean_reason}\n\nCheck Cockpit logs for details."
         await self._post(job, body)
 
+    async def post_pr_review_ack(self, github_repo: str, pr_number: int, comment_id: str) -> None:
+        body = "✅ Received — addressing now"
+        await self._post_to_pr(github_repo, pr_number, body)
+
+    async def post_pr_review_response(self, github_repo: str, pr_number: int, claude_output: str) -> None:
+        clean = _scrub(claude_output)[:3000]
+        body = f"🔄 **Review comment addressed:**\n\n{clean}"
+        await self._post_to_pr(github_repo, pr_number, body)
+
     # ── Internal ───────────────────────────────────────────────────────────────
 
     async def _post(self, job: Job, body: str) -> int | None:
@@ -96,6 +105,21 @@ class PRCommenter:
             logger.warning(f"PR comment failed {resp.status_code}: {resp.text[:200]}")
         except Exception as e:
             logger.error(f"PR comment error: {e}")
+        return None
+
+    async def _post_to_pr(self, github_repo: str, pr_number: int, body: str) -> int | None:
+        if not settings.pr_comments_enabled:
+            return None
+        if not settings.github_token:
+            return None
+        url = f"{GITHUB_API}/repos/{github_repo}/issues/{pr_number}/comments"
+        try:
+            resp = await self._get_client().post(url, json={"body": body})
+            if resp.status_code == 201:
+                return resp.json().get("id")
+            logger.warning(f"PR review comment failed {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            logger.error(f"PR review comment error: {e}")
         return None
 
     async def _reply(self, job: Job, reply_to_id: int, body: str) -> None:

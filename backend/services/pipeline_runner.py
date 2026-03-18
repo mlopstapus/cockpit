@@ -4,10 +4,11 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from config import settings
-from models import Job, JobStatus
+from models import ActivePR, Job, JobStatus
 from services.account_rotator import AccountRotator
 from services.claude_process import ClaudeProcess
 from services.comment_relay import CommentRelay
@@ -150,6 +151,20 @@ class PipelineRunner:
             await self._job_store.mark_complete(job.id)
             await self._pr_commenter.post_job_complete(job)
             logger.info(f"Pipeline complete for job {job.id}")
+
+            # Register PR for post-implementation comment watching
+            final_job = await self._job_store.get(job.id)
+            if final_job and final_job.pr_url:
+                pr_match = re.search(r"/pull/(\d+)", final_job.pr_url)
+                if pr_match:
+                    await self._job_store.register_active_pr(ActivePR(
+                        job_id=job.id,
+                        github_repo=job.github_repo,
+                        pr_number=int(pr_match.group(1)),
+                        issue_number=job.issue_number,
+                        repo_path=job.repo_path,
+                        registered_at=datetime.utcnow(),
+                    ))
 
             if settings.expo_restart_enabled:
                 await self._restart_expo(job)
