@@ -134,6 +134,23 @@ class AccountRotator:
             })
         return result
 
+    RATE_LIMIT_SIGNALS = (
+        "rate limit",
+        "rate_limit",
+        "please wait",
+        "too many requests",
+        "usage limit",
+        "try again in",
+        "claude is currently unavailable",
+        "you've reached your usage limit",
+        "you have reached your usage limit",
+    )
+
+    def detect_rate_limit(self, line: str) -> bool:
+        """Return True if this PTY output line signals a rate limit."""
+        lower = line.lower()
+        return any(signal in lower for signal in self.RATE_LIMIT_SIGNALS)
+
     def _next_available_time(self) -> str:
         """Get earliest time an account becomes available."""
         times = [

@@ -19,10 +19,11 @@ class ClaudeProcess:
     in a real terminal — necessary for its interactive features.
     """
 
-    def __init__(self, repo_path: str, config_dir: str, session_id: str):
+    def __init__(self, repo_path: str, config_dir: str, session_id: str, extra_flags: list[str] | None = None):
         self.repo_path = Path(repo_path).expanduser().resolve()
         self.config_dir = Path(config_dir).expanduser().resolve()
         self.session_id = session_id
+        self.extra_flags: list[str] = extra_flags or []
 
         self.pid: int | None = None
         self.master_fd: int | None = None
@@ -75,8 +76,9 @@ class ClaudeProcess:
             # Change to repo directory
             os.chdir(str(self.repo_path))
 
-            # Exec claude
-            os.execvpe("claude", ["claude"], env)
+            # Exec claude with any extra flags (e.g. --dangerously-skip-permissions)
+            args = ["claude"] + self.extra_flags
+            os.execvpe("claude", args, env)
         else:
             # Parent process
             os.close(slave_fd)

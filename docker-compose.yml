@@ -1,76 +1,44 @@
 version: '3.9'
 
 services:
-  # PostgreSQL database
-  postgres:
-    image: postgres:16-alpine
-    container_name: cockpit-postgres
-    environment:
-      POSTGRES_DB: cockpit
-      POSTGRES_USER: cockpit
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-cockpit-dev-password}
+  redis:
+    image: redis:7-alpine
+    container_name: cockpit-redis
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - redis_data:/data
     ports:
-      - "5433:5432"
+      - "6379:6379"
+    command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cockpit"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 5
 
-  # FastAPI Backend
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: cockpit-api
     depends_on:
-      postgres:
+      redis:
         condition: service_healthy
     environment:
       PYTHONUNBUFFERED: ${PYTHONUNBUFFERED:-1}
-      DATABASE_URL: postgresql://cockpit:${DB_PASSWORD:-cockpit-password}@postgres:5432/cockpit
-      CLAUDE_CONFIG_DIR: ${CLAUDE_CONFIG_DIR:-/home/claude/.claude}
+      REDIS_URL: redis://redis:6379
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_OWNER: ${GITHUB_OWNER:-mlopstapus}
+      GITHUB_REPOS: ${GITHUB_REPOS:-mlopstapus/seamless}
+      GITHUB_POLL_INTERVAL: ${GITHUB_POLL_INTERVAL:-30}
       PROFILES_DIR: ${PROFILES_DIR:-/home/claude/.claude-profiles}
-      BROWSE_ROOT: ${BROWSE_ROOT:-/repos}
+      REPO_LOCAL_PATHS: ${REPO_LOCAL_PATHS:-}
       DEBUG: ${DEBUG:-false}
     volumes:
-      - ${HOME_DIR}/.claude-profiles:/home/claude/.claude-profiles:ro
-      - ${HOME_DIR}/.claude:/home/claude/.claude:ro
-      - ${HOME_DIR}/repos:/repos:ro
+      - ${HOME_DIR:-~}/.claude-profiles:/home/claude/.claude-profiles:ro
+      - ${HOME_DIR:-~}/.claude:/home/claude/.claude:ro
+      - ${HOME_DIR:-~}/repos:/repos
     ports:
       - "8001:8000"
 
-  # React Frontend
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
-    container_name: cockpit-frontend
-    depends_on:
-      - api
-    ports:
-      - "3004:3000"
-
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    container_name: cockpit-nginx
-    depends_on:
-      - api
-      - frontend
-    ports:
-      - "8080:80"
-      - "8443:443"
-    volumes:
-      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/ssl/certs:/etc/ssl/certs:ro
-      - nginx_cache:/var/cache/nginx
-
 volumes:
-  postgres_data:
-  nginx_cache:
-
+  redis_data:

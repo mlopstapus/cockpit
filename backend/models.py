@@ -4,19 +4,26 @@ from enum import Enum
 from pydantic import BaseModel
 
 
-class SessionStatus(str, Enum):
-    STARTING = "starting"
-    RUNNING = "running"
+class JobStage(str, Enum):
     IDLE = "idle"
-    RATE_LIMITED = "rate_limited"
-    ERROR = "error"
-    STOPPED = "stopped"
+    SPECIFY = "specify"
+    CLARIFY = "clarify"
+    PLAN = "plan"
+    TASKS = "tasks"
+    ANALYZE = "analyze"
+    IMPLEMENT = "implement"
+    DONE = "done"
+    FAILED = "failed"
 
 
-class MessageRole(str, Enum):
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    AWAITING_CLARIFICATION = "awaiting_clarification"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class AuthStatus(str, Enum):
@@ -26,32 +33,43 @@ class AuthStatus(str, Enum):
     ERROR = "error"
 
 
-# --- Requests ---
+# --- Job models ---
+
+class Job(BaseModel):
+    id: str
+    repo_path: str            # local filesystem path
+    github_repo: str          # "owner/repo"
+    pr_number: int
+    pr_title: str
+    pr_body: str
+    spec_name: str            # title stripped of "[COCKPIT] " prefix
+    branch: str
+    stage: JobStage = JobStage.IDLE
+    status: JobStatus = JobStatus.QUEUED
+    account_id: str = "primary"
+    pr_comment_id: int | None = None   # ID of latest clarify question comment
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    pr_url: str | None = None          # GitHub PR URL
+    error: str | None = None
 
 
-class CreateSessionRequest(BaseModel):
-    project_id: str
-    name: str | None = None  # Auto-generated if not provided
-    account_id: str | None = None  # Auto-selected if not provided
-    feature_description: str | None = None  # If provided, auto-triggers /new workflow
-    auto_execute: bool = True  # If True with feature_description, starts /new immediately
+class JobSummary(BaseModel):
+    """Lightweight job info for list endpoints."""
+    id: str
+    github_repo: str
+    pr_number: int
+    pr_title: str
+    spec_name: str
+    stage: JobStage
+    status: JobStatus
+    created_at: datetime
+    updated_at: datetime
+    pr_url: str | None = None
 
 
-class SendMessageRequest(BaseModel):
-    content: str
-
-
-# --- Responses ---
-
-
-class RepoInfo(BaseModel):
-    name: str
-    path: str
-    description: str
-    default_branch: str
-    docker_compose: bool
-    active_sessions: int = 0
-
+# --- Account models ---
 
 class AccountInfo(BaseModel):
     id: str
@@ -60,95 +78,12 @@ class AccountInfo(BaseModel):
     priority: int
     auth_status: AuthStatus = AuthStatus.AUTHENTICATED
     is_rate_limited: bool = False
+    rate_limit_until: float = 0
     messages_today: int = 0
     daily_estimate: int = 100
-    active_sessions: int = 0
 
 
-class Message(BaseModel):
-    id: str
-    session_id: str
-    role: MessageRole
-    content: str
-    timestamp: datetime
-
-
-class SessionInfo(BaseModel):
-    id: str
-    name: str
-    project_id: str
-    project_name: str
-    repo_path: str
-    account_id: str
-    status: SessionStatus
-    created_at: datetime
-    last_activity: datetime
-    message_count: int = 0
-
-
-class SessionDetail(SessionInfo):
-    messages: list[Message] = []
-
-
-# --- WebSocket Messages ---
-
-
-class WSMessageType(str, Enum):
-    OUTPUT = "output"          # Streaming output from Claude
-    STATUS = "status"          # Session status change
-    ERROR = "error"            # Error occurred
-    ACCOUNT_SWITCH = "account_switch"  # Account was rotated
-    TASK_COMPLETE = "task_complete"     # Claude finished a task
-
-
-class WSMessage(BaseModel):
-    type: WSMessageType
-    session_id: str
-    data: dict
-    timestamp: datetime = None
-
-    def __init__(self, **kwargs):
-        if "timestamp" not in kwargs or kwargs["timestamp"] is None:
-            kwargs["timestamp"] = datetime.now()
-        super().__init__(**kwargs)
-
-
-# --- Auth Management ---
-
-
-# --- Projects ---
-
-
-class CreateProjectRequest(BaseModel):
-    name: str
-    description: str | None = None
-    repo_path: str
-    color: str | None = None
-    icon: str | None = None
-
-
-class ProjectInfo(BaseModel):
-    id: str
-    name: str
-    description: str
-    repo_path: str
-    color: str
-    icon: str
-    created_at: datetime
-    updated_at: datetime
-    session_count: int = 0
-
-
-class UpdateProjectRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    repo_path: str | None = None
-    color: str | None = None
-    icon: str | None = None
-
-
-# --- Auth Management ---
-
+# --- Auth models (reused from original) ---
 
 class AuthStatusResponse(BaseModel):
     account_id: str
@@ -161,6 +96,30 @@ class AuthStatusResponse(BaseModel):
 
 class AuthInitiateResponse(BaseModel):
     account_id: str
-    status: str  # "initiated", "already_authenticated", etc.
+    status: str
     message: str
     instructions: str | None = None
+
+
+# --- WebSocket messages ---
+
+class WSMessageType(str, Enum):
+    LOG = "log"
+    STAGE_CHANGE = "stage_change"
+    JOB_COMPLETE = "job_complete"
+    JOB_FAILED = "job_failed"
+    STATUS = "status"
+    OUTPUT = "output"
+    ACCOUNT_SWITCH = "account_switch"
+
+
+class WSMessage(BaseModel):
+    type: WSMessageType
+    job_id: str
+    data: dict
+    timestamp: datetime | None = None
+
+    def __init__(self, **kwargs):
+        if not kwargs.get("timestamp"):
+            kwargs["timestamp"] = datetime.now()
+        super().__init__(**kwargs)
