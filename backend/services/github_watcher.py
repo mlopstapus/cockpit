@@ -1,4 +1,4 @@
-"""Polls GitHub for [COCKPIT]-prefixed PRs and enqueues jobs."""
+"""Polls GitHub for [COCKPIT]-prefixed issues and enqueues jobs."""
 import asyncio
 import logging
 
@@ -14,7 +14,7 @@ GITHUB_API = "https://api.github.com"
 
 
 class GithubWatcher:
-    """Background task that polls configured repos for [COCKPIT] PRs."""
+    """Background task that polls configured repos for [COCKPIT] issues."""
 
     def __init__(self, job_store: JobStore):
         self._job_store = job_store
@@ -73,8 +73,11 @@ class GithubWatcher:
                 logger.error(f"Error polling {repo}: {e}")
 
     async def _poll_repo(self, repo: str) -> None:
-        url = f"{GITHUB_API}/repos/{repo}/pulls"
-        resp = await self._client.get(url, params={"state": "open", "per_page": 50})
+        # GitHub issues API returns both issues and PRs; filter PRs out via pull_request key
+        url = f"{GITHUB_API}/repos/{repo}/issues"
+        resp = await self._client.get(
+            url, params={"state": "open", "per_page": 50}
+        )
 
         if resp.status_code == 401:
             logger.error("GitHub token rejected (401) — check GITHUB_TOKEN")
@@ -83,22 +86,26 @@ class GithubWatcher:
             logger.warning(f"GitHub API {resp.status_code} for {repo}")
             return
 
-        prs = resp.json()
-        for pr in prs:
-            title: str = pr.get("title", "")
+        items = resp.json()
+        for item in items:
+            # Skip pull requests (they appear in the issues list too)
+            if item.get("pull_request"):
+                continue
+
+            title: str = item.get("title", "")
             if not title.startswith(COCKPIT_PREFIX):
                 continue
 
-            # Only process PRs opened by the configured owner
-            author: str = pr.get("user", {}).get("login", "")
+            # Only process issues opened by the configured owner
+            author: str = item.get("user", {}).get("login", "")
             if author != settings.github_owner:
-                logger.debug(f"Skipping PR #{pr['number']} from {author} (not owner)")
+                logger.debug(f"Skipping issue #{item['number']} from {author} (not owner)")
                 continue
 
-            await self._maybe_enqueue(repo, pr)
+            await self._maybe_enqueue(repo, item)
 
-    async def _maybe_enqueue(self, repo: str, pr: dict) -> None:
-        pr_number = pr["number"]
+    async def _maybe_enqueue(self, repo: str, issue: dict) -> None:
+        issue_number = issue["number"]
         local_path = settings.get_local_path(repo)
 
         if local_path is None:
@@ -110,13 +117,12 @@ class GithubWatcher:
 
         job = JobStore.make_job(
             github_repo=repo,
-            pr_number=pr_number,
-            pr_title=pr["title"],
-            pr_body=pr.get("body") or "",
-            branch=pr["head"]["ref"],
+            issue_number=issue_number,
+            issue_title=issue["title"],
+            issue_body=issue.get("body") or "",
             repo_path=str(local_path),
         )
 
         job_id = await self._job_store.enqueue(job)
         if job_id == job.id:
-            logger.info(f"New job {job_id}: {repo}#{pr_number} — {job.spec_name}")
+            logger.info(f"New job {job_id}: {repo}#{issue_number} — {job.spec_name}")

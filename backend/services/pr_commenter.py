@@ -85,7 +85,7 @@ class PRCommenter:
         if not settings.github_token:
             return None
 
-        url = f"{GITHUB_API}/repos/{job.github_repo}/issues/{job.pr_number}/comments"
+        url = f"{GITHUB_API}/repos/{job.github_repo}/issues/{job.issue_number}/comments"
         try:
             resp = await self._get_client().post(url, json={"body": body})
             if resp.status_code == 201:

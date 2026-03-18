@@ -39,11 +39,10 @@ class Job(BaseModel):
     id: str
     repo_path: str            # local filesystem path
     github_repo: str          # "owner/repo"
-    pr_number: int
-    pr_title: str
-    pr_body: str
+    issue_number: int         # GitHub issue that triggered the job
+    issue_title: str
+    issue_body: str
     spec_name: str            # title stripped of "[COCKPIT] " prefix
-    branch: str
     stage: JobStage = JobStage.IDLE
     status: JobStatus = JobStatus.QUEUED
     account_id: str = "primary"
@@ -51,7 +50,8 @@ class Job(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
-    pr_url: str | None = None          # GitHub PR URL
+    pr_number: int | None = None       # set after Claude creates the PR
+    pr_url: str | None = None          # GitHub PR URL (set after implement stage)
     error: str | None = None
 
 
@@ -59,13 +59,14 @@ class JobSummary(BaseModel):
     """Lightweight job info for list endpoints."""
     id: str
     github_repo: str
-    pr_number: int
-    pr_title: str
+    issue_number: int
+    issue_title: str
     spec_name: str
     stage: JobStage
     status: JobStatus
     created_at: datetime
     updated_at: datetime
+    pr_number: int | None = None
     pr_url: str | None = None
 
 

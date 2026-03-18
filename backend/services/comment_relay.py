@@ -116,7 +116,7 @@ class CommentRelay:
             await asyncio.sleep(POLL_INTERVAL)
 
     async def _check_comments(self, job) -> None:
-        url = f"{GITHUB_API}/repos/{job.github_repo}/issues/{job.pr_number}/comments"
+        url = f"{GITHUB_API}/repos/{job.github_repo}/issues/{job.issue_number}/comments"
         try:
             resp = await self._get_client().get(url, params={"per_page": 50})
             if resp.status_code != 200:

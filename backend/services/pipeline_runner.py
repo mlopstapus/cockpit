@@ -40,7 +40,7 @@ class Stage:
 
 
 STAGES = [
-    Stage("specify",   "/speckit.specify {spec_name}: {pr_body}"),
+    Stage("specify",   "/speckit.specify {spec_name}: {issue_body}"),
     Stage("clarify",   "/speckit.clarify"),
     Stage("plan",      "/speckit.plan"),
     Stage("tasks",     "/speckit.tasks"),
@@ -170,7 +170,7 @@ class PipelineRunner:
 
         cmd = stage.command_template.format(
             spec_name=job.spec_name,
-            pr_body=job.pr_body[:2000],
+            issue_body=job.issue_body[:2000],
         )
         await process.send(cmd)
 

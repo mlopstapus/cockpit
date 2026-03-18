@@ -31,8 +31,8 @@ def _seen_key(job_id: str) -> str:
     return f"job:{job_id}:seen_comments"
 
 
-def _pr_key(github_repo: str, pr_number: int) -> str:
-    return f"pr:{github_repo}:{pr_number}"
+def _issue_key(github_repo: str, issue_number: int) -> str:
+    return f"issue:{github_repo}:{issue_number}"
 
 
 class JobStore:
@@ -49,20 +49,20 @@ class JobStore:
     # ── Enqueue ────────────────────────────────────────────────────────────────
 
     async def enqueue(self, job: Job) -> str:
-        """Add a job to the queue. Deduplicates by PR."""
-        pr_key = _pr_key(job.github_repo, job.pr_number)
+        """Add a job to the queue. Deduplicates by issue."""
+        issue_key = _issue_key(job.github_repo, job.issue_number)
 
-        # Dedup: if a job already exists for this PR, skip
-        existing_id = await self._redis.get(pr_key)
+        # Dedup: if a job already exists for this issue, skip
+        existing_id = await self._redis.get(issue_key)
         if existing_id:
-            logger.debug(f"PR {job.github_repo}#{job.pr_number} already queued as {existing_id}")
+            logger.debug(f"Issue {job.github_repo}#{job.issue_number} already queued as {existing_id}")
             return existing_id
 
         # Persist job hash
         await self._redis.hset(_job_key(job.id), mapping=self._serialize(job))
 
-        # Record PR → job mapping
-        await self._redis.set(pr_key, job.id)
+        # Record issue → job mapping
+        await self._redis.set(issue_key, job.id)
 
         # Push to work queue
         await self._redis.rpush("jobs:queue", job.id)
@@ -73,7 +73,7 @@ class JobStore:
             {job.id: job.created_at.timestamp()},
         )
 
-        logger.info(f"Enqueued job {job.id} for {job.github_repo}#{job.pr_number}")
+        logger.info(f"Enqueued job {job.id} for {job.github_repo}#{job.issue_number}")
         return job.id
 
     # ── Dequeue ────────────────────────────────────────────────────────────────
@@ -185,11 +185,10 @@ class JobStore:
             "id": job.id,
             "repo_path": job.repo_path,
             "github_repo": job.github_repo,
-            "pr_number": str(job.pr_number),
-            "pr_title": job.pr_title,
-            "pr_body": job.pr_body,
+            "issue_number": str(job.issue_number),
+            "issue_title": job.issue_title,
+            "issue_body": job.issue_body,
             "spec_name": job.spec_name,
-            "branch": job.branch,
             "stage": job.stage.value,
             "status": job.status.value,
             "account_id": job.account_id,
@@ -197,6 +196,7 @@ class JobStore:
             "created_at": job.created_at.isoformat(),
             "updated_at": job.updated_at.isoformat(),
             "completed_at": job.completed_at.isoformat() if job.completed_at else "",
+            "pr_number": str(job.pr_number) if job.pr_number else "",
             "pr_url": job.pr_url or "",
             "error": job.error or "",
         }
@@ -210,11 +210,10 @@ class JobStore:
             id=data["id"],
             repo_path=data["repo_path"],
             github_repo=data["github_repo"],
-            pr_number=int(data["pr_number"]),
-            pr_title=data["pr_title"],
-            pr_body=data["pr_body"],
+            issue_number=int(data["issue_number"]),
+            issue_title=data["issue_title"],
+            issue_body=data["issue_body"],
             spec_name=data["spec_name"],
-            branch=data["branch"],
             stage=JobStage(data["stage"]),
             status=JobStatus(data["status"]),
             account_id=data["account_id"],
@@ -222,6 +221,7 @@ class JobStore:
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
             completed_at=_dt(data.get("completed_at", "")),
+            pr_number=int(data["pr_number"]) if data.get("pr_number") else None,
             pr_url=data.get("pr_url") or None,
             error=data.get("error") or None,
         )
@@ -231,25 +231,23 @@ class JobStore:
     @staticmethod
     def make_job(
         github_repo: str,
-        pr_number: int,
-        pr_title: str,
-        pr_body: str,
-        branch: str,
+        issue_number: int,
+        issue_title: str,
+        issue_body: str,
         repo_path: str,
         account_id: str = "primary",
     ) -> Job:
         cockpit_prefix = "[COCKPIT] "
-        spec_name = pr_title[len(cockpit_prefix):].strip() if pr_title.startswith(cockpit_prefix) else pr_title
+        spec_name = issue_title[len(cockpit_prefix):].strip() if issue_title.startswith(cockpit_prefix) else issue_title
         now = datetime.utcnow()
         return Job(
             id=str(uuid.uuid4())[:8],
             repo_path=repo_path,
             github_repo=github_repo,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            pr_body=pr_body,
+            issue_number=issue_number,
+            issue_title=issue_title,
+            issue_body=issue_body,
             spec_name=spec_name,
-            branch=branch,
             stage=JobStage.IDLE,
             status=JobStatus.QUEUED,
             account_id=account_id,

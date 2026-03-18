@@ -69,7 +69,13 @@ async def test_cockpit_status_comments_not_relayed():
 
     # Build a minimal job in redis
     from services.job_store import JobStore as JS
-    job = JS.make_job("mlopstapus/seamless", 1, "[COCKPIT] test", "body", "branch", "/repos/s")
+    job = JS.make_job(
+        github_repo="mlopstapus/seamless",
+        issue_number=1,
+        issue_title="[COCKPIT] test",
+        issue_body="body",
+        repo_path="/repos/s",
+    )
     await store.enqueue(job)
     await store.update(job.id, status=JobStatus.RUNNING)
 

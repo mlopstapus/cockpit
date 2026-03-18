@@ -12,11 +12,10 @@ def _make_job(**kwargs) -> Job:
         id="test1234",
         repo_path="/repos/seamless",
         github_repo="mlopstapus/seamless",
-        pr_number=42,
-        pr_title="[COCKPIT] add auth flow",
-        pr_body="Add user authentication",
+        issue_number=42,
+        issue_title="[COCKPIT] add auth flow",
+        issue_body="Add user authentication",
         spec_name="add auth flow",
-        branch="cockpit/add-auth-flow",
         stage=JobStage.IDLE,
         status=JobStatus.QUEUED,
         account_id="primary",
@@ -48,8 +47,8 @@ async def test_enqueue_dequeue_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_deduplicates_same_pr():
-    """Second enqueue for same PR returns existing job id."""
+async def test_enqueue_deduplicates_same_issue():
+    """Second enqueue for same issue returns existing job id."""
     from fakeredis.aioredis import FakeRedis
     from services.job_store import JobStore
 
@@ -63,7 +62,7 @@ async def test_enqueue_deduplicates_same_pr():
     job2 = _make_job(id="other999")
     id2 = await store.enqueue(job2)
 
-    assert id1 == id2  # same PR → same job
+    assert id1 == id2  # same issue → same job
 
 
 @pytest.mark.asyncio
@@ -145,11 +144,10 @@ def test_make_job_strips_cockpit_prefix():
     from services.job_store import JobStore
     job = JobStore.make_job(
         github_repo="mlopstapus/seamless",
-        pr_number=1,
-        pr_title="[COCKPIT] add user auth",
-        pr_body="body",
-        branch="feat/add-auth",
+        issue_number=1,
+        issue_title="[COCKPIT] add user auth",
+        issue_body="body",
         repo_path="/repos/seamless",
     )
     assert job.spec_name == "add user auth"
-    assert job.pr_title == "[COCKPIT] add user auth"
+    assert job.issue_title == "[COCKPIT] add user auth"
