@@ -65,13 +65,6 @@ class Settings(BaseSettings):
     # PR comments toggle (disable for dev/testing)
     pr_comments_enabled: bool = True
 
-    @field_validator("github_repos", mode="before")
-    @classmethod
-    def parse_repos(cls, v):
-        if isinstance(v, str):
-            return [r.strip() for r in v.split(",") if r.strip()]
-        return v
-
     @field_validator("repo_local_paths", mode="before")
     @classmethod
     def parse_local_paths(cls, v):
