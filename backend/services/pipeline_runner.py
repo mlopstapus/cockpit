@@ -10,7 +10,7 @@ from pathlib import Path
 from config import settings
 from models import ActivePR, Job, JobStatus
 from services.account_rotator import AccountRotator
-from services.claude_process import ClaudeProcess
+from services.claude_process import ClaudeProcess, TimeoutWithPartialOutput
 from services.comment_relay import CommentRelay
 from services.job_store import JobStore
 from services.pr_commenter import PRCommenter
@@ -19,6 +19,7 @@ from ws.hub import WebSocketHub
 logger = logging.getLogger(__name__)
 
 STAGE_TIMEOUT = settings.stage_timeout_minutes * 60
+IMPLEMENT_TIMEOUT = settings.implement_timeout_minutes * 60
 CLARIFY_TIMEOUT = settings.clarify_timeout_hours * 3600
 
 # Stage completion sentinels — matched against accumulated PTY output.
@@ -141,6 +142,11 @@ class PipelineRunner:
         try:
             await process.start()
 
+            await process.send_oneshot(
+                "Run: git checkout main && git pull. Do not say anything else.",
+                timeout=60,
+            )
+
             for stage in STAGES:
                 success = await self._run_stage(job, process, stage, inject_queue)
                 if not success:
@@ -197,10 +203,25 @@ class PipelineRunner:
             issue_body=job.issue_body[:2000],
         )
 
+        timeout = IMPLEMENT_TIMEOUT if stage_name == "implement" else STAGE_TIMEOUT
         try:
-            output = await process.send_oneshot(cmd, timeout=STAGE_TIMEOUT)
+            output = await process.send_oneshot(cmd, timeout=timeout)
+        except TimeoutWithPartialOutput as e:
+            # On implement timeout, check if Claude already created the PR
+            if stage_name == "implement":
+                pr_url = self._extract_pr_url(e.partial_output)
+                if pr_url:
+                    logger.warning(f"Job {job.id}: implement timed out but PR found — recording as complete")
+                    await self._job_store.update(job.id, pr_url=pr_url)
+                    await self._pr_commenter.post_stage_complete(job, stage_name, time.monotonic() - t_start)
+                    return True
+            reason = f"Stage '{stage_name}' timed out after {timeout}s"
+            logger.warning(f"Job {job.id}: {reason}")
+            await self._job_store.mark_failed(job.id, reason)
+            await self._pr_commenter.post_job_failed(job, stage_name, reason)
+            return False
         except asyncio.TimeoutError:
-            reason = f"Stage '{stage_name}' timed out after {STAGE_TIMEOUT}s"
+            reason = f"Stage '{stage_name}' timed out after {timeout}s"
             logger.warning(f"Job {job.id}: {reason}")
             await self._job_store.mark_failed(job.id, reason)
             await self._pr_commenter.post_job_failed(job, stage_name, reason)

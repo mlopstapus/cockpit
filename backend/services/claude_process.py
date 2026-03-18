@@ -8,6 +8,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class TimeoutWithPartialOutput(asyncio.TimeoutError):
+    """Raised when a Claude invocation times out, carrying whatever stdout was collected."""
+    def __init__(self, partial_output: str):
+        super().__init__()
+        self.partial_output = partial_output
+
+
 class ClaudeProcess:
     """Wraps a single Claude Code CLI session.
 
@@ -68,17 +75,25 @@ class ClaudeProcess:
 
         logger.info(f"Session {self.session_id}: claude -p (PID {proc.pid}): {message[:80]}...")
 
+        chunks: list[bytes] = []
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            async with asyncio.timeout(timeout):
+                while True:
+                    chunk = await proc.stdout.read(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.communicate()
-            raise
+            await proc.wait()
+            partial = b"".join(chunks).decode(errors="replace")
+            raise TimeoutWithPartialOutput(partial)
 
+        stderr_bytes = await proc.stderr.read()
         self.pid = None
 
-        stdout_text = stdout.decode(errors="replace")
-        stderr_text = stderr.decode(errors="replace")
+        stdout_text = b"".join(chunks).decode(errors="replace")
+        stderr_text = stderr_bytes.decode(errors="replace")
 
         if proc.returncode != 0:
             # Claude Code sometimes puts errors in stdout, sometimes stderr

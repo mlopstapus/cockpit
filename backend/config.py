@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # Pipeline timeouts
     stage_timeout_minutes: int = 30
+    implement_timeout_minutes: int = 120  # implement runs longer (PR creation + tests)
     clarify_timeout_hours: int = 24
 
     # PR comments toggle (disable for dev/testing)
