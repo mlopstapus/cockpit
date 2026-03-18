@@ -28,7 +28,7 @@ services:
       REDIS_URL: redis://redis:6379
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       GITHUB_OWNER: ${GITHUB_OWNER:-mlopstapus}
-      GITHUB_REPOS: ${GITHUB_REPOS:-mlopstapus/seamless}
+      GITHUB_REPOS: ${GITHUB_REPOS:-["mlopstapus/seamless"]}
       GITHUB_POLL_INTERVAL: ${GITHUB_POLL_INTERVAL:-30}
       PROFILES_DIR: ${PROFILES_DIR:-/home/claude/.claude-profiles}
       REPO_LOCAL_PATHS: ${REPO_LOCAL_PATHS:-}

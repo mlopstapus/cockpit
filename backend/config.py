@@ -1,7 +1,7 @@
 """Configuration for Claude Cockpit."""
 import json
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import BaseModel, field_validator
 
 
@@ -15,6 +15,8 @@ class AccountConfig(BaseModel):
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_list_separator=",")
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
