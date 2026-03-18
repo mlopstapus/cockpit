@@ -47,13 +47,15 @@ PR created by Claude → linked in issue
 ```
 GITHUB_TOKEN          GitHub personal access token (repo scope)
 GITHUB_OWNER          Your GitHub username (e.g. mlopstapus)
-GITHUB_REPOS          Comma-separated repos to watch (e.g. mlopstapus/seamless)
+GITHUB_REPOS          Comma-separated repos to watch (e.g. mlopstapus/seamless or repo1,repo2)
+                      Do NOT use JSON array format — plain comma-separated only
 GITHUB_POLL_INTERVAL  Seconds between polls (default: 30)
 REDIS_URL             Redis connection (default: redis://redis:6379)
 REPO_LOCAL_PATHS      JSON map of "owner/repo" → local path
                       e.g. '{"mlopstapus/seamless":"/home/ben/repos/seamless"}'
 PROFILES_DIR          Claude profile directory (default: ~/.claude-profiles)
 PR_COMMENTS_ENABLED   Set false to suppress issue comments (useful for testing)
+EXPO_RESTART_ENABLED  Set false to skip Expo dev server restart after implement (default: true)
 ```
 
 ## Installs & Dependencies
@@ -75,6 +77,7 @@ If the pipeline needs a tool that isn't present on the host (e.g. `gh` CLI, `exp
 |------|---------|---------|
 | `gh` | `apt install gh` | GitHub CLI — used by spec-kit to open PRs |
 | `claude` | npm global | Claude Code CLI — spawned by PipelineRunner |
+| `node` / `npx` | nvm (see step 4) | Expo dev server |
 
 > **Note**: Docker services (Redis, API) cannot run installs that affect the host. If a new host dependency is needed, install it on the host and update this table.
 
@@ -109,7 +112,35 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now cockpit-api@<user>
 ```
 
-### 4. Useful ops commands
+### 4. Install & enable the Expo dev server (first time)
+
+**Prerequisite**: Node.js must be installed (nvm is recommended):
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+source ~/.bashrc   # or open a new shell
+nvm install --lts
+```
+
+The Expo dev server runs as a `--user` systemd service so Cockpit can restart it
+after each successful implement stage. It auto-detects the Tailscale IP so Expo Go
+on your phone can connect over Tailscale.
+
+```bash
+# Install as a user-level service (no sudo required)
+mkdir -p ~/.config/systemd/user
+cp seamless-expo.service ~/.config/systemd/user/seamless-expo.service
+systemctl --user daemon-reload
+systemctl --user enable --now seamless-expo
+```
+
+To view logs:
+```bash
+journalctl --user -u seamless-expo -f
+```
+
+On your phone: open Expo Go → enter URL manually: `exp://<tailscale-ip>:8081`
+
+### 5. Useful ops commands
 
 ```bash
 sudo systemctl status cockpit-api@<user>

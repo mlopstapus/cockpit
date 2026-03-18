@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 STAGE_TIMEOUT = settings.stage_timeout_minutes * 60
 CLARIFY_TIMEOUT = settings.clarify_timeout_hours * 3600
-CLAUDE_READY_WAIT = 3.0
 
 # Stage completion sentinels — matched against accumulated PTY output.
 # Validate against actual speckit output and adjust as needed.
@@ -46,6 +45,12 @@ STAGES = [
     Stage("tasks",     "/speckit.tasks"),
     Stage("analyze",   "/speckit.analyze"),
     Stage("implement", "/speckit.implement"),
+]
+
+# Expo dev server restart command — run after implement if configured.
+# Uses systemctl --user so no sudo required.
+_EXPO_RESTART_CMD = [
+    "systemctl", "--user", "restart", "seamless-expo",
 ]
 
 
@@ -134,16 +139,20 @@ class PipelineRunner:
 
         try:
             await process.start()
-            await asyncio.sleep(CLAUDE_READY_WAIT)
 
             for stage in STAGES:
                 success = await self._run_stage(job, process, stage, inject_queue)
                 if not success:
                     return
+                # Brief pause between stages to avoid rate limit cascades
+                await asyncio.sleep(5)
 
             await self._job_store.mark_complete(job.id)
             await self._pr_commenter.post_job_complete(job)
             logger.info(f"Pipeline complete for job {job.id}")
+
+            if settings.expo_restart_enabled:
+                await self._restart_expo(job)
 
         except Exception as e:
             logger.error(f"Pipeline error for job {job.id}: {e}", exc_info=True)
@@ -161,7 +170,7 @@ class PipelineRunner:
         stage: Stage,
         inject_queue: asyncio.Queue,
     ) -> bool:
-        """Run a single stage. Returns True on success, False on failure."""
+        """Run a single stage via 'claude -p'. Returns True on success."""
         stage_name = stage.name
         logger.info(f"Job {job.id}: stage {stage_name}")
         await self._job_store.update(job.id, stage=stage_name, status=JobStatus.RUNNING)
@@ -172,67 +181,67 @@ class PipelineRunner:
             spec_name=job.spec_name,
             issue_body=job.issue_body[:2000],
         )
-        await process.send(cmd)
-
-        output_q: asyncio.Queue = process.subscribe()
-        accumulated = ""
 
         try:
-            deadline = time.monotonic() + STAGE_TIMEOUT
+            output = await process.send_oneshot(cmd, timeout=STAGE_TIMEOUT)
+        except asyncio.TimeoutError:
+            reason = f"Stage '{stage_name}' timed out after {STAGE_TIMEOUT}s"
+            logger.warning(f"Job {job.id}: {reason}")
+            await self._job_store.mark_failed(job.id, reason)
+            await self._pr_commenter.post_job_failed(job, stage_name, reason)
+            return False
 
+        await self._hub.broadcast_raw(job.id, output)
+        await self._job_store.append_log(job.id, output)
+
+        # Clarify stage: loop until no more questions or clarify signals completion.
+        # Each round: extract questions → post to GitHub issue → wait for owner reply →
+        # re-run /speckit.clarify with the answer so it encodes it into spec.md.
+        if stage_name == "clarify":
+            round_num = 0
             while True:
-                if time.monotonic() >= deadline:
-                    reason = f"Stage '{stage_name}' timed out after {STAGE_TIMEOUT}s"
-                    logger.warning(f"Job {job.id}: {reason}")
-                    await self._job_store.mark_failed(job.id, reason)
-                    await self._pr_commenter.post_job_failed(job, stage_name, reason)
+                posted = await self._comment_relay.post_clarify_questions(job.id, output)
+                if not posted:
+                    break  # No questions in this output — clarify is done
+                round_num += 1
+                answer = await self._wait_for_clarification_answer(job, inject_queue)
+                if answer is None:
                     return False
-
-                try:
-                    chunk: str | None = await asyncio.wait_for(output_q.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    await self._drain_inject_queue(inject_queue, process)
-                    continue
-
-                if chunk is None:
-                    reason = f"PTY closed during stage '{stage_name}'"
-                    await self._job_store.mark_failed(job.id, reason)
-                    await self._pr_commenter.post_job_failed(job, stage_name, reason)
-                    return False
-
-                await self._hub.broadcast_raw(job.id, chunk)
-                await self._job_store.append_log(job.id, chunk)
-                accumulated += chunk
-
-                # Clarify stage: detect questions and wait for owner's reply
-                if stage_name == "clarify":
-                    posted = await self._comment_relay.post_clarify_questions(job.id, accumulated)
-                    if posted:
-                        if not await self._wait_for_clarification(job, inject_queue, process):
-                            return False
-                        break
-
-                if self._stage_complete(stage_name, accumulated):
-                    duration = time.monotonic() - t_start
-                    await self._pr_commenter.post_stage_complete(job, stage_name, duration)
-                    logger.info(f"Job {job.id}: {stage_name} complete ({duration:.0f}s)")
-
-                    if stage_name == "implement":
-                        pr_url = self._extract_pr_url(accumulated)
-                        if pr_url:
-                            await self._job_store.update(job.id, pr_url=pr_url)
-
+                output = await process.send_oneshot(
+                    f"/speckit.clarify {answer}", timeout=STAGE_TIMEOUT
+                )
+                await self._hub.broadcast_raw(job.id, output)
+                await self._job_store.append_log(job.id, output)
+                # If clarify signals completion, stop looping
+                if self._stage_complete("clarify", output):
                     break
 
-        finally:
-            process.unsubscribe(output_q)
+        duration = time.monotonic() - t_start
 
+        if self._stage_complete(stage_name, output):
+            await self._pr_commenter.post_stage_complete(job, stage_name, duration)
+            logger.info(f"Job {job.id}: {stage_name} complete ({duration:.0f}s)")
+
+            if stage_name == "implement":
+                pr_url = self._extract_pr_url(output)
+                if pr_url:
+                    await self._job_store.update(job.id, pr_url=pr_url)
+
+            return True
+
+        # Stage ran but sentinel not found — treat as complete anyway
+        # (output may use different wording; sentinel list may need tuning)
+        logger.warning(
+            f"Job {job.id}: {stage_name} sentinel not matched — treating as complete. "
+            f"Tail: {output[-200:]!r}"
+        )
+        await self._pr_commenter.post_stage_complete(job, stage_name, duration)
         return True
 
-    async def _wait_for_clarification(
-        self, job: Job, inject_queue: asyncio.Queue, process: ClaudeProcess
-    ) -> bool:
-        """Block until the owner answers the clarify question or timeout."""
+    async def _wait_for_clarification_answer(
+        self, job: Job, inject_queue: asyncio.Queue
+    ) -> str | None:
+        """Block until the owner posts a reply or timeout expires."""
         await self._job_store.update(job.id, status=JobStatus.AWAITING_CLARIFICATION)
         logger.info(f"Job {job.id}: awaiting clarification")
         deadline = time.monotonic() + CLARIFY_TIMEOUT
@@ -240,27 +249,36 @@ class PipelineRunner:
         while time.monotonic() < deadline:
             try:
                 answer = await asyncio.wait_for(inject_queue.get(), timeout=30.0)
-                await process.send(answer)
                 await self._job_store.update(job.id, status=JobStatus.RUNNING)
-                logger.info(f"Job {job.id}: clarify answer injected")
-                return True
+                logger.info(f"Job {job.id}: clarify answer received")
+                return answer
             except asyncio.TimeoutError:
                 current = await self._job_store.get(job.id)
                 if current and current.status == JobStatus.CANCELLED:
-                    return False
+                    return None
 
-        # Timeout — proceed with assumptions
-        logger.warning(f"Job {job.id}: clarify timeout — proceeding")
-        await process.send("No clarification received — proceeding with best-effort assumptions.")
+        logger.warning(f"Job {job.id}: clarify timeout — proceeding with assumptions")
         await self._job_store.update(job.id, status=JobStatus.RUNNING)
-        return True
+        return "No clarification received — proceed with best-effort assumptions."
 
-    async def _drain_inject_queue(self, inject_queue: asyncio.Queue, process: ClaudeProcess) -> None:
-        while not inject_queue.empty():
-            try:
-                await process.send(inject_queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
+    async def _restart_expo(self, job) -> None:
+        """Restart the seamless-expo systemd user service after a successful implement."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *_EXPO_RESTART_CMD,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            if proc.returncode == 0:
+                logger.info(f"Job {job.id}: Expo dev server restarted")
+                await self._pr_commenter.post_comment(
+                    job, "📱 Expo dev server restarted — open Expo Go and connect via Tailscale."
+                )
+            else:
+                logger.warning(f"Job {job.id}: Expo restart failed: {stderr.decode()[:200]}")
+        except Exception as e:
+            logger.warning(f"Job {job.id}: Expo restart error: {e}")
 
     @staticmethod
     def _stage_complete(stage_name: str, text: str) -> bool:

@@ -1,6 +1,7 @@
 """Configuration for Claude Cockpit."""
 import json
 from pathlib import Path
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import BaseModel, field_validator
 
@@ -15,7 +16,7 @@ class AccountConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_list_separator=",")
+    model_config = SettingsConfigDict()
 
     # Server
     host: str = "0.0.0.0"
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     # GitHub
     github_token: str = ""
     github_owner: str = "mlopstapus"
-    github_repos: list[str] = ["mlopstapus/seamless"]
+    github_repos: Optional[list[str]] = ["mlopstapus/seamless"]
     github_poll_interval: int = 30  # seconds
 
     # Maps "owner/repo" -> local path on NUC, JSON-encoded string or default
@@ -38,22 +39,16 @@ class Settings(BaseSettings):
     # Claude profiles
     profiles_dir: str = "~/.claude-profiles"
 
-    # Accounts
+    # Accounts — config_dir must point to a directory that contains valid
+    # Claude credentials (i.e. where you've run `claude` interactively and
+    # logged in). Defaults to ~/.claude (the standard Claude Code config dir).
     accounts: list[AccountConfig] = [
         AccountConfig(
             id="primary",
             name="Claude Pro - Primary",
-            config_dir="~/.claude-profiles/primary",
+            config_dir="~/.claude",
             tier="pro",
             priority=1,
-            daily_message_estimate=100,
-        ),
-        AccountConfig(
-            id="secondary",
-            name="Claude Pro - Secondary",
-            config_dir="~/.claude-profiles/secondary",
-            tier="pro",
-            priority=2,
             daily_message_estimate=100,
         ),
     ]
@@ -64,6 +59,16 @@ class Settings(BaseSettings):
 
     # PR comments toggle (disable for dev/testing)
     pr_comments_enabled: bool = True
+
+    # Expo dev server — restart after each successful implement stage
+    expo_restart_enabled: bool = True
+
+    @field_validator("github_repos", mode="before")
+    @classmethod
+    def parse_repos(cls, v):
+        if isinstance(v, str):
+            return [r.strip() for r in v.split(",") if r.strip()]
+        return v or []
 
     @field_validator("repo_local_paths", mode="before")
     @classmethod

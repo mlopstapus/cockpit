@@ -72,6 +72,9 @@ class PRCommenter:
         body = f"🚀 **Pipeline complete!** All spec-kit stages done. {pr_link}\n\nReview the spec artifacts and implementation in this PR."
         await self._post(job, body)
 
+    async def post_comment(self, job: Job, body: str) -> int | None:
+        return await self._post(job, body)
+
     async def post_job_failed(self, job: Job, stage: str, reason: str) -> None:
         clean_reason = _scrub(reason)[:500]
         body = f"❌ **Pipeline failed** at **{stage}**: {clean_reason}\n\nCheck Cockpit logs for details."

@@ -8,6 +8,9 @@ Type=simple
 User=%i
 WorkingDirectory=/home/%i/repos/cockpit/backend
 
+# Extend PATH so the service can find claude (~/.local/bin) and other user tools
+Environment=PATH=/home/%i/.local/bin:/usr/local/bin:/usr/bin:/bin
+
 # Load env vars from .env file in the repo root
 EnvironmentFile=/home/%i/repos/cockpit/.env
 

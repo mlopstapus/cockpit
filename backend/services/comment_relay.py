@@ -18,8 +18,13 @@ GITHUB_API = "https://api.github.com"
 POLL_INTERVAL = 15        # seconds between comment polls
 MAX_COMMENT_LENGTH = 4000 # truncate before PTY injection
 
-# Pattern to detect numbered question list in Claude's clarify output
-_QUESTION_RE = re.compile(r"^\s*\d+[\.\)]\s+.{10,}", re.MULTILINE)
+# Matches speckit.clarify's "**Question N of up to M**" block header
+_SPECKIT_Q_RE = re.compile(
+    r"\*\*Question\s+\d+\s+of\s+up\s+to\s+\d+\*\*(.+?)(?=\*\*Question\s+\d+|\Z)",
+    re.DOTALL,
+)
+# Fallback: plain numbered list (1. question text)
+_NUMBERED_Q_RE = re.compile(r"^\s*\d+[\.\)]\s+.{10,}", re.MULTILINE)
 
 
 class CommentRelay:
@@ -167,15 +172,24 @@ class CommentRelay:
 
     @staticmethod
     def _extract_questions(text: str) -> list[str]:
-        """Pull numbered questions from Claude's clarify output."""
-        matches = _QUESTION_RE.findall(text)
-        # Clean up leading numbering
+        """Pull questions from Claude's clarify output.
+
+        Handles both speckit.clarify's '**Question N of up to M**' format
+        and plain numbered lists.
+        """
+        # Try speckit format first
+        matches = _SPECKIT_Q_RE.findall(text)
+        if matches:
+            return [m.strip() for m in matches if m.strip()][:10]
+
+        # Fallback: plain numbered list
+        plain = _NUMBERED_Q_RE.findall(text)
         questions = []
-        for m in matches:
+        for m in plain:
             q = re.sub(r"^\s*\d+[\.\)]\s*", "", m).strip()
             if q:
                 questions.append(q)
-        return questions[:10]  # cap at 10
+        return questions[:10]
 
     @staticmethod
     def _sanitise(text: str) -> str:
