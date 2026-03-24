@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { extractPrUrl } from '../process/claude-process.js';
-import { postIssueComment, listIssueComments } from '../github/commenter.js';
+import { postIssueComment, listIssueComments, BOT_COMMENT_PREFIXES } from '../github/commenter.js';
 import { registerActivePr } from '../db/prs.js';
 import { appendLog } from '../db/logs.js';
 import { markFailed, markComplete, markStage } from '../db/jobs.js';
@@ -71,8 +71,7 @@ function isClarifyDone(output) {
 }
 
 function isHumanComment(c) {
-  const prefixes = ['💬', '🚀', '✅', '❌', '⚠️', '🎉'];
-  return !prefixes.some(p => c.body.startsWith(p));
+  return !BOT_COMMENT_PREFIXES.some(p => c.body.startsWith(p));
 }
 
 // Wait for the next human reply after `since` timestamp. Returns body text or null on timeout.
@@ -180,13 +179,17 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
   const claudeBin = opts.claudeBin || 'claude';
   const spawnFn = opts.spawnFn || null;
 
-  try {
-    await postIssueComment(
-      octokit, job.github_repo, job.issue_number,
-      `🚀 **Cockpit picked up issue #${job.issue_number}**: *${job.spec_name}*\n\nRunning spec-kit pipeline… I'll post updates as each stage completes.`
-    );
-  } catch (err) {
-    console.error(`Failed to post picked-up comment: ${err.message}`);
+  const isResume = job.stage && job.stage !== 'idle';
+
+  if (!isResume) {
+    try {
+      await postIssueComment(
+        octokit, job.github_repo, job.issue_number,
+        `🚀 **Cockpit picked up issue #${job.issue_number}**: *${job.spec_name}*\n\nRunning spec-kit pipeline… I'll post updates as each stage completes.`
+      );
+    } catch (err) {
+      console.error(`Failed to post picked-up comment: ${err.message}`);
+    }
   }
 
   const log = (line) => appendLog(db, job.id, redactSecrets(line, config.githubToken));

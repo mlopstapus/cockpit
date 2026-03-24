@@ -1,3 +1,7 @@
+// All emoji prefixes used by Cockpit's own bot comments.
+// Used by both issue and PR comment filters to prevent processing own comments.
+export const BOT_COMMENT_PREFIXES = ['👀', '💬', '🚀', '✅', '❌', '⚠️', '🎉'];
+
 function parseRepo(repoFullName) {
   const [owner, repo] = repoFullName.split('/');
   return { owner, repo };

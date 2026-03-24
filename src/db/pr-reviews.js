@@ -20,3 +20,15 @@ export function dequeuePrReview(db) {
   });
   return dequeue();
 }
+
+export function markPrReviewComplete(db, id) {
+  db.prepare(
+    "UPDATE pr_review_jobs SET status = 'completed' WHERE id = ?"
+  ).run(id);
+}
+
+export function resetPrReviewToQueued(db, id) {
+  db.prepare(
+    "UPDATE pr_review_jobs SET status = 'queued' WHERE id = ?"
+  ).run(id);
+}

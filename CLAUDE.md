@@ -171,6 +171,8 @@ Only issues from `githubOwner` are processed.
 - SQLite via better-sqlite3 (WAL mode, `~/.cockpit/cockpit.db`) — no schema migration needed (config is JSON) (003-repo-startup-command)
 - Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, node:child_process (execFile) (003-repo-startup-command)
 - Config JSON (`~/.cockpit/config.json`) — no DB changes needed (003-repo-startup-command)
+- Node.js 18+ ESM + `better-sqlite3`, `@octokit/rest`, `commander@12`, `node:child_process` (execFile, spawn) (004-poll-pr-comments)
+- SQLite WAL via `better-sqlite3` (`~/.cockpit/cockpit.db`) — schema already has all needed tables (004-poll-pr-comments)
 
 ## Recent Changes
 - 003-repo-startup-command: Added Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, @clack/prompts, chalk, node-pty
