@@ -1,0 +1,1 @@
+When I initialize the package it should install github spec-kit and it should walk them through building a constitution in their project. 
