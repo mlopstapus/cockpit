@@ -33,10 +33,12 @@
 
 | Principle | Gate Question | Status |
 |-----------|--------------|--------|
-| I. Trust-Based Collaboration | Will all agent actions be scoped to a feature branch and logged? | [ ] |
+| I. Trust-Based Collaboration | Will all agent actions be scoped to a feature branch and logged? Is any project-specific behaviour expressed via config, not source code? | [ ] |
 | II. Thorough Change Review | Will this feature be delivered as a PR with session logs available for review? | [ ] |
-| III. Security First | Have all external inputs been identified and sanitised? Are secrets handled via env vars? | [ ] |
+| III. Security First | Have all external inputs been identified and sanitised? Are secrets stored in GitHub or injected via env vars (not in source)? Is VPN/private network access enforced? | [ ] |
 | IV. Test-Driven Implementation | Are tests planned alongside (or before) implementation for all critical paths? | [ ] |
+| V. Dev Box Execution Model | Does this feature assume host-OS execution (no containerised agents)? Are post-implement hooks expressed as configurable shell commands? | [ ] |
+| VI. Continuous Self-Improvement | Are memory updates, template improvements, and backlog entries planned for session close? | [ ] |
 
 ## Project Structure
 

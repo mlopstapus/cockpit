@@ -1,0 +1,22 @@
+[Unit]
+Description=Cockpit API — Issue-driven spec pipeline
+After=network.target
+
+[Service]
+Type=simple
+# The user the service runs as (filled in by setup CLI)
+User={{USERNAME}}
+# Cockpit repo root directory
+WorkingDirectory={{COCKPIT_DIR}}
+# Path to the generated .env file
+EnvironmentFile={{COCKPIT_DIR}}/.env
+# Python virtualenv uvicorn entrypoint
+ExecStart={{COCKPIT_DIR}}/backend/.venv/bin/uvicorn main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --app-dir {{COCKPIT_DIR}}/backend
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -23,17 +23,17 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
 
-    # Redis
-    redis_url: str = "redis://localhost:6379"
+    # Storage
+    db_path: str = "~/.cockpit/cockpit.db"
 
     # GitHub
     github_token: str = ""
-    github_owner: str = "mlopstapus"
-    github_repos: Optional[list[str]] = ["mlopstapus/seamless"]
+    github_owner: str = ""
+    github_repos: Optional[list[str]] = []
     github_poll_interval: int = 30  # seconds
 
-    # Maps "owner/repo" -> local path on NUC, JSON-encoded string or default
-    # e.g. '{"mlopstapus/seamless": "/home/ben/repos/seamless"}'
+    # Maps "owner/repo" -> local path on this machine, JSON-encoded string
+    # e.g. '{"your-org/your-repo": "/home/user/repos/your-repo"}'
     repo_local_paths: dict[str, str] = {}
 
     # Claude profiles
@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     # PR comments toggle (disable for dev/testing)
     pr_comments_enabled: bool = True
 
-    # Expo dev server — restart after each successful implement stage
-    expo_restart_enabled: bool = True
+    # Post-implement hook — optional shell command run via /bin/sh -c after each successful implement
+    post_implement_command: str = ""
 
     @field_validator("github_repos", mode="before")
     @classmethod

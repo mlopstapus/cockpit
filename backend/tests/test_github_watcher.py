@@ -1,9 +1,10 @@
 """Tests for GithubWatcher."""
 import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-def _issue(title: str = "[COCKPIT] add auth", login: str = "mlopstapus", number: int = 1, state: str = "open"):
+def _issue(title: str = "[COCKPIT] add auth", login: str = "test-owner", number: int = 1, state: str = "open"):
     return {
         "number": number,
         "title": title,
@@ -14,21 +15,24 @@ def _issue(title: str = "[COCKPIT] add auth", login: str = "mlopstapus", number:
     }
 
 
-@pytest.mark.asyncio
-async def test_cockpit_prefix_issue_enqueued(monkeypatch):
-    """[COCKPIT] issue from owner → job enqueued."""
-    from fakeredis.aioredis import FakeRedis
+@pytest_asyncio.fixture
+async def store():
     from services.job_store import JobStore
+    s = JobStore()
+    await s._init_db(":memory:")
+    yield s
+    await s.close()
+
+
+@pytest.mark.asyncio
+async def test_cockpit_prefix_issue_enqueued(store, monkeypatch):
+    """[COCKPIT] issue from owner → job enqueued."""
     from services.github_watcher import GithubWatcher
     import config
 
     monkeypatch.setattr(config.settings, "github_token", "tok")
-    monkeypatch.setattr(config.settings, "github_owner", "mlopstapus")
-    monkeypatch.setattr(config.settings, "github_repos", ["mlopstapus/seamless"])
-
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    monkeypatch.setattr(config.settings, "github_owner", "test-owner")
+    monkeypatch.setattr(config.settings, "github_repos", ["test-owner/my-repo"])
 
     watcher = GithubWatcher(store)
     watcher._client = AsyncMock()
@@ -40,27 +44,21 @@ async def test_cockpit_prefix_issue_enqueued(monkeypatch):
     with patch.object(config.Settings, "get_local_path", lambda self, repo: Path("/tmp")):
         await watcher._poll_once()
 
-    job = await store.dequeue(timeout=1)
+    job = await store.dequeue()
     assert job is not None
     assert job.spec_name == "add auth"
     assert job.issue_number == 1
 
 
 @pytest.mark.asyncio
-async def test_non_cockpit_prefix_ignored(monkeypatch):
+async def test_non_cockpit_prefix_ignored(store, monkeypatch):
     """Issue without [COCKPIT] prefix is not enqueued."""
-    from fakeredis.aioredis import FakeRedis
-    from services.job_store import JobStore
     from services.github_watcher import GithubWatcher
     import config
 
     monkeypatch.setattr(config.settings, "github_token", "tok")
-    monkeypatch.setattr(config.settings, "github_owner", "mlopstapus")
-    monkeypatch.setattr(config.settings, "github_repos", ["mlopstapus/seamless"])
-
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    monkeypatch.setattr(config.settings, "github_owner", "test-owner")
+    monkeypatch.setattr(config.settings, "github_repos", ["test-owner/my-repo"])
 
     watcher = GithubWatcher(store)
     watcher._client = AsyncMock()
@@ -69,25 +67,19 @@ async def test_non_cockpit_prefix_ignored(monkeypatch):
     )
 
     await watcher._poll_once()
-    job = await store.dequeue(timeout=1)
+    job = await store.dequeue()
     assert job is None
 
 
 @pytest.mark.asyncio
-async def test_wrong_owner_ignored(monkeypatch):
+async def test_wrong_owner_ignored(store, monkeypatch):
     """Issue from non-owner is not enqueued."""
-    from fakeredis.aioredis import FakeRedis
-    from services.job_store import JobStore
     from services.github_watcher import GithubWatcher
     import config
 
     monkeypatch.setattr(config.settings, "github_token", "tok")
-    monkeypatch.setattr(config.settings, "github_owner", "mlopstapus")
-    monkeypatch.setattr(config.settings, "github_repos", ["mlopstapus/seamless"])
-
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    monkeypatch.setattr(config.settings, "github_owner", "test-owner")
+    monkeypatch.setattr(config.settings, "github_repos", ["test-owner/my-repo"])
 
     watcher = GithubWatcher(store)
     watcher._client = AsyncMock()
@@ -96,25 +88,19 @@ async def test_wrong_owner_ignored(monkeypatch):
     )
 
     await watcher._poll_once()
-    job = await store.dequeue(timeout=1)
+    job = await store.dequeue()
     assert job is None
 
 
 @pytest.mark.asyncio
-async def test_pull_requests_skipped(monkeypatch):
+async def test_pull_requests_skipped(store, monkeypatch):
     """Items with pull_request key are skipped even if title matches."""
-    from fakeredis.aioredis import FakeRedis
-    from services.job_store import JobStore
     from services.github_watcher import GithubWatcher
     import config
 
     monkeypatch.setattr(config.settings, "github_token", "tok")
-    monkeypatch.setattr(config.settings, "github_owner", "mlopstapus")
-    monkeypatch.setattr(config.settings, "github_repos", ["mlopstapus/seamless"])
-
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    monkeypatch.setattr(config.settings, "github_owner", "test-owner")
+    monkeypatch.setattr(config.settings, "github_repos", ["test-owner/my-repo"])
 
     pr_item = {**_issue(), "pull_request": {"url": "https://api.github.com/..."}}
 
@@ -125,25 +111,19 @@ async def test_pull_requests_skipped(monkeypatch):
     )
 
     await watcher._poll_once()
-    job = await store.dequeue(timeout=1)
+    job = await store.dequeue()
     assert job is None
 
 
 @pytest.mark.asyncio
-async def test_already_queued_issue_skipped(monkeypatch):
+async def test_already_queued_issue_skipped(store, monkeypatch):
     """Second poll for same issue does not create a duplicate job."""
-    from fakeredis.aioredis import FakeRedis
-    from services.job_store import JobStore
     from services.github_watcher import GithubWatcher
     import config
 
     monkeypatch.setattr(config.settings, "github_token", "tok")
-    monkeypatch.setattr(config.settings, "github_owner", "mlopstapus")
-    monkeypatch.setattr(config.settings, "github_repos", ["mlopstapus/seamless"])
-
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    monkeypatch.setattr(config.settings, "github_owner", "test-owner")
+    monkeypatch.setattr(config.settings, "github_repos", ["test-owner/my-repo"])
 
     watcher = GithubWatcher(store)
     watcher._client = AsyncMock()
@@ -157,7 +137,10 @@ async def test_already_queued_issue_skipped(monkeypatch):
         await watcher._poll_once()
 
     # Only one job in queue
-    j1 = await store.dequeue(timeout=1)
-    j2 = await store.dequeue(timeout=1)
+    j1 = await store.dequeue()
+    # Mark it so second dequeue doesn't find it
+    if j1:
+        await store.mark_active(j1.id)
+    j2 = await store.dequeue()
     assert j1 is not None
     assert j2 is None

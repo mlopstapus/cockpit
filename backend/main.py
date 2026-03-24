@@ -32,7 +32,8 @@ async def lifespan(app: FastAPI):
     # ── Startup ────────────────────────────────────────────────────────────────
     logger.info("Starting Claude Cockpit...")
 
-    job_store = JobStore(settings.redis_url)
+    job_store = JobStore()
+    await job_store._init_db(settings.db_path)
     account_rotator = AccountRotator()
     hub = WebSocketHub()
     pr_commenter = PRCommenter()

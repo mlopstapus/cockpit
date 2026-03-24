@@ -51,30 +51,25 @@ def test_sanitise_decodes_html_entities():
 @pytest.mark.asyncio
 async def test_cockpit_status_comments_not_relayed():
     """Comments starting with status emojis are not injected."""
-    from fakeredis.aioredis import FakeRedis
     from services.job_store import JobStore
     from services.comment_relay import CommentRelay
     from services.pr_commenter import PRCommenter
     from models import JobStatus
     import config
-    from datetime import datetime
 
-    r = FakeRedis(decode_responses=True)
-    store = JobStore.__new__(JobStore)
-    store._redis = r
+    store = JobStore()
+    await store._init_db(":memory:")
 
     commenter = AsyncMock(spec=PRCommenter)
     relay = CommentRelay(store, commenter)
     relay._get_client = MagicMock()
 
-    # Build a minimal job in redis
-    from services.job_store import JobStore as JS
-    job = JS.make_job(
-        github_repo="mlopstapus/seamless",
+    job = JobStore.make_job(
+        github_repo="test-owner/my-repo",
         issue_number=1,
         issue_title="[COCKPIT] test",
         issue_body="body",
-        repo_path="/repos/s",
+        repo_path="/repos/my-project",
     )
     await store.enqueue(job)
     await store.update(job.id, status=JobStatus.RUNNING)
@@ -82,7 +77,7 @@ async def test_cockpit_status_comments_not_relayed():
     # Simulate a ✅ ack comment from owner — should be skipped
     ack_comment = {
         "id": 501,
-        "user": {"login": "mlopstapus"},
+        "user": {"login": "test-owner"},
         "body": "✅ Got it — continuing",
     }
     relay._get_client.return_value = MagicMock()
@@ -92,8 +87,10 @@ async def test_cockpit_status_comments_not_relayed():
 
     inject_q = relay.get_inject_queue(job.id)
 
-    with patch.object(config.settings, "github_owner", "mlopstapus"):
+    with patch.object(config.settings, "github_owner", "test-owner"):
         await relay._check_comments(job)
+
+    await store.close()
 
     # Nothing should have been injected
     assert inject_q.empty()
