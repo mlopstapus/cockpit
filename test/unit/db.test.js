@@ -6,7 +6,8 @@ import path from 'node:path';
 import { openDb } from '../../src/db/index.js';
 import {
   enqueueJob, dequeueJob, markActive, markComplete, markFailed, markCancelled,
-  getJob, listActive, listRecent, makeJobId
+  getJob, listActive, listRecent, makeJobId,
+  markRateLimited, requeueExpiredRateLimited, listRateLimited, requeueInterrupted,
 } from '../../src/db/jobs.js';
 import { appendLog, getLogTail } from '../../src/db/logs.js';
 import { isCommentSeen, markCommentSeen } from '../../src/db/comments.js';
@@ -243,5 +244,142 @@ describe('PR review queue', () => {
     assert.ok(dequeued);
     assert.equal(dequeued.id, 'rev00001');
     assert.equal(dequeued.comment_body, 'LGTM');
+  });
+});
+
+// ── Rate-limit DB functions (T009) ─────────────────────────────────────────
+
+describe('markRateLimited', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('sets status to rate_limited with correct fields', () => {
+    const job = makeJob({ issue_number: 600 });
+    enqueueJob(db, job);
+    markActive(db, job.id);
+    const resetAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    markRateLimited(db, job.id, resetAt, 1);
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'rate_limited');
+    assert.equal(updated.rate_limit_reset_at, resetAt);
+    assert.equal(updated.rate_limit_count, 1);
+  });
+
+  test('increments count correctly on successive calls', () => {
+    const job = makeJob({ issue_number: 601 });
+    enqueueJob(db, job);
+    markRateLimited(db, job.id, new Date().toISOString(), 1);
+    assert.equal(getJob(db, job.id).rate_limit_count, 1);
+    markRateLimited(db, job.id, new Date().toISOString(), 2);
+    assert.equal(getJob(db, job.id).rate_limit_count, 2);
+  });
+
+  test('accepts null resetAt (fallback case)', () => {
+    const job = makeJob({ issue_number: 602 });
+    enqueueJob(db, job);
+    markRateLimited(db, job.id, null, 1);
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'rate_limited');
+    assert.equal(updated.rate_limit_reset_at, null);
+  });
+});
+
+describe('requeueExpiredRateLimited', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('requeues job whose reset time is in the past', () => {
+    const job = makeJob({ issue_number: 610 });
+    enqueueJob(db, job);
+    const pastTime = new Date(Date.now() - 1000).toISOString();
+    markRateLimited(db, job.id, pastTime, 1);
+    const count = requeueExpiredRateLimited(db);
+    assert.equal(count, 1);
+    assert.equal(getJob(db, job.id).status, 'queued');
+    assert.equal(getJob(db, job.id).rate_limit_reset_at, null);
+  });
+
+  test('does NOT requeue job whose reset time is in the future', () => {
+    const job = makeJob({ issue_number: 611 });
+    enqueueJob(db, job);
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    markRateLimited(db, job.id, futureTime, 1);
+    const count = requeueExpiredRateLimited(db);
+    assert.equal(count, 0);
+    assert.equal(getJob(db, job.id).status, 'rate_limited');
+  });
+
+  test('requeues job with null resetAt (unknown reset time)', () => {
+    const job = makeJob({ issue_number: 612 });
+    enqueueJob(db, job);
+    markRateLimited(db, job.id, null, 1);
+    const count = requeueExpiredRateLimited(db);
+    assert.equal(count, 1);
+    assert.equal(getJob(db, job.id).status, 'queued');
+  });
+
+  test('preserves rate_limit_count when requeuing', () => {
+    const job = makeJob({ issue_number: 613 });
+    enqueueJob(db, job);
+    markRateLimited(db, job.id, new Date(Date.now() - 1000).toISOString(), 2);
+    requeueExpiredRateLimited(db);
+    assert.equal(getJob(db, job.id).rate_limit_count, 2);
+  });
+});
+
+describe('listRateLimited', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('returns only rate_limited jobs', () => {
+    const rl = makeJob({ issue_number: 620 });
+    const active = makeJob({ issue_number: 621 });
+    enqueueJob(db, rl);
+    enqueueJob(db, active);
+    markRateLimited(db, rl.id, null, 1);
+    markActive(db, active.id);
+    const results = listRateLimited(db);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].id, rl.id);
+  });
+
+  test('returns empty array when no rate-limited jobs', () => {
+    const db2 = openDb(':memory:');
+    const results = listRateLimited(db2);
+    assert.ok(Array.isArray(results));
+    assert.equal(results.length, 0);
+    db2.close();
+  });
+});
+
+// ── T019: requeueInterrupted does NOT touch rate_limited jobs ──────────────
+
+describe('requeueInterrupted — leaves rate_limited jobs untouched', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('rate_limited job stays rate_limited after requeueInterrupted', () => {
+    const job = makeJob({ issue_number: 630 });
+    enqueueJob(db, job);
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    markRateLimited(db, job.id, futureTime, 1);
+    requeueInterrupted(db);
+    assert.equal(getJob(db, job.id).status, 'rate_limited');
+  });
+
+  test('active job is requeued but rate_limited job is preserved', () => {
+    const activeJob = makeJob({ issue_number: 631 });
+    const rlJob = makeJob({ issue_number: 632 });
+    enqueueJob(db, activeJob);
+    enqueueJob(db, rlJob);
+    markActive(db, activeJob.id);
+    markRateLimited(db, rlJob.id, new Date(Date.now() + 3600000).toISOString(), 1);
+    requeueInterrupted(db);
+    assert.equal(getJob(db, activeJob.id).status, 'queued');
+    assert.equal(getJob(db, rlJob.id).status, 'rate_limited');
   });
 });

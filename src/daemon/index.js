@@ -11,7 +11,10 @@ const PID_FILE = path.join(COCKPIT_DIR, 'daemon.pid');
 const DB_PATH = path.join(COCKPIT_DIR, 'cockpit.db');
 
 export function recoverCrashedJobs(db) {
-  // Re-queue interrupted jobs so they resume from the last started stage
+  // Re-queue interrupted jobs so they resume from the last started stage.
+  // Note: requeueInterrupted only touches status='active' — rate_limited jobs are
+  // intentionally left in their wait state and will be requeued by
+  // requeueExpiredRateLimited in the poll loop once the reset time passes.
   requeueInterrupted(db);
 }
 

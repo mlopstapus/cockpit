@@ -173,6 +173,9 @@ Only issues from `githubOwner` are processed.
 - Config JSON (`~/.cockpit/config.json`) — no DB changes needed (003-repo-startup-command)
 - Node.js 18+ ESM + `better-sqlite3`, `@octokit/rest`, `commander@12`, `node:child_process` (execFile, spawn) (004-poll-pr-comments)
 - SQLite WAL via `better-sqlite3` (`~/.cockpit/cockpit.db`) — schema already has all needed tables (004-poll-pr-comments)
+- Node.js 18+ ESM + `better-sqlite3`, `@octokit/rest`, `node:child_process` (spawn) (005-claude-rate-limits)
+- SQLite via `better-sqlite3` (`~/.cockpit/cockpit.db`) — two new columns added via `ALTER TABLE ADD COLUMN` (005-claude-rate-limits)
 
 ## Recent Changes
+- 005-claude-rate-limits: Detect Claude API rate limits from stdout/stderr, persist rate_limited status to SQLite with reset time, auto-requeue after reset, retry cap of 3, show in `cockpit status`
 - 003-repo-startup-command: Added Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, @clack/prompts, chalk, node-pty
