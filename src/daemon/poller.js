@@ -1,7 +1,9 @@
 import { readConfig } from '../config/index.js';
 import { pollRepo } from '../github/watcher.js';
+import { pollActivePr } from '../github/pr-watcher.js';
 import { createClient, RateLimitError } from '../github/client.js';
-import { runNextJob } from './job-runner.js';
+import { runNextJob, runNextPrReview } from './job-runner.js';
+import { listActivePrs } from '../db/prs.js';
 import { expandHome } from '../config/index.js';
 
 const COCKPIT_DIR = expandHome('~/.cockpit');
@@ -46,12 +48,44 @@ export async function startPollLoop(db, opts = {}) {
       }
     }
 
+    // Poll active PRs for new review comments
+    if (!getShuttingDown()) {
+      const activePrs = listActivePrs(db);
+      for (const pr of activePrs) {
+        if (getShuttingDown()) break;
+        try {
+          await pollActivePr(octokit, db, pr, config.githubOwner);
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            console.warn(`Rate limited polling PR #${pr.pr_number}. Sleeping ${Math.ceil(err.waitMs / 1000)}s...`);
+            await sleep(err.waitMs);
+            break;
+          }
+          console.error(`Error polling PR #${pr.pr_number} (${pr.github_repo}): ${err.message}`);
+        }
+      }
+    }
+
     if (!getShuttingDown()) {
       // Run next queued job (if any)
       try {
         await runNextJob(db, octokit, config);
       } catch (err) {
         console.error(`Job runner error: ${err.message}`);
+      }
+    }
+
+    // Run next queued PR review job (if any)
+    if (!getShuttingDown()) {
+      try {
+        await runNextPrReview(db, octokit, config);
+      } catch (err) {
+        if (err instanceof RateLimitError) {
+          console.warn(`Rate limited during PR review. Sleeping ${Math.ceil(err.waitMs / 1000)}s...`);
+          await sleep(err.waitMs);
+        } else {
+          console.error(`PR review runner error: ${err.message}`);
+        }
       }
     }
 

@@ -41,8 +41,10 @@ function makeJob(repoPath, overrides = {}) {
 
 function makeOctokit() {
   const comments = [];
+  const prs = [];
   return {
     comments,
+    prs,
     issues: {
       createComment: async ({ owner, repo, issue_number, body }) => {
         comments.push({ owner, repo, issue_number, body });
@@ -50,6 +52,34 @@ function makeOctokit() {
       },
       listComments: async () => ({ data: [] }),
     },
+    pulls: {
+      create: async ({ owner, repo }) => {
+        const pr = { number: prs.length + 1, html_url: `https://github.com/${owner}/${repo}/pull/${prs.length + 1}` };
+        prs.push(pr);
+        return { data: pr };
+      },
+    },
+  };
+}
+
+// Mock gitFn that returns a fake feature branch and succeeds for all git/shell calls.
+function makeGitFn(branch = 'feature/test-feature') {
+  return async (bin, args) => {
+    if (bin === 'git' && args.includes('--show-current')) {
+      return { stdout: branch, stderr: '' };
+    }
+    return { stdout: '', stderr: '' };
+  };
+}
+
+// SpawnFn that succeeds for all stages except the one at failIdx (0-based).
+function makeSpawnFnFailAt(failIdx) {
+  let call = 0;
+  return () => {
+    const exitCode = call === failIdx ? 1 : 0;
+    const lines = call === 1 ? ['no clarification needed'] : [];
+    call++;
+    return makeChildProcess(lines, exitCode);
   };
 }
 
@@ -440,6 +470,123 @@ describe('executeJob — startup command reporting (US2)', () => {
     const updated = getJob(db, job.id);
     assert.equal(updated.status, 'completed');
     assert.equal(updated.error, null);
+    cleanup(); repoCleanup();
+  });
+});
+
+// ---------- PR guarantee tests ----------
+
+describe('executeJob — draft PR guarantee on implement failure', () => {
+  test('opens draft PR when implement stage fails and includes URL in failure comment', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    // implement is call index 6 (analyze fires twice: stage + remediation)
+    const spawnFn = makeSpawnFnFailAt(6);
+    const gitFn = makeGitFn('feature/test-feature');
+
+    await executeJob(db, job, octokit, config, { spawnFn, gitFn });
+
+    // Job should be marked failed
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'failed');
+
+    // A draft PR should have been created
+    assert.equal(octokit.prs.length, 1, 'Expected one draft PR to be created');
+
+    // The failure comment should mention the draft PR URL
+    const failComment = octokit.comments.find(c => c.body.includes('❌') && c.body.toLowerCase().includes('implement'));
+    assert.ok(failComment, 'Expected ❌ implement failure comment');
+    assert.ok(failComment.body.includes('github.com') && failComment.body.includes('/pull/'),
+      'Failure comment should include draft PR URL');
+
+    cleanup(); repoCleanup();
+  });
+
+  test('does not create PR on non-implement stage failure', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    // specify is stage index 0 — fail immediately
+    const spawnFn = makeSpawnFnFailAt(0);
+    const gitFn = makeGitFn('feature/test-feature');
+
+    await executeJob(db, job, octokit, config, { spawnFn, gitFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'failed');
+    assert.equal(octokit.prs.length, 0, 'Should not create PR when non-implement stage fails');
+
+    cleanup(); repoCleanup();
+  });
+});
+
+describe('executeJob — draft PR guarantee on implement success without PR', () => {
+  test('creates draft PR when all stages succeed but no PR URL detected in output', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    // All stages succeed, none emit a PR URL
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+    const gitFn = makeGitFn('feature/test-feature');
+
+    await executeJob(db, job, octokit, config, { spawnFn, gitFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed');
+
+    // A fallback draft PR should have been created
+    assert.equal(octokit.prs.length, 1, 'Expected one draft PR to be created as fallback');
+
+    // A 🎉 PR opened comment should appear
+    assert.ok(octokit.comments.some(c => c.body.includes('🎉') && c.body.includes('github.com')),
+      'Expected 🎉 PR opened comment with URL');
+
+    cleanup(); repoCleanup();
+  });
+
+  test('skips draft PR creation when implement already opened a PR', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    // implement emits a PR URL — no fallback should be triggered.
+    // analyze fires twice (stage + remediation), so implement is call index 6.
+    const spawnFn = makeSpawnFn([
+      [],
+      ['no clarification needed'],
+      [], [], [],
+      [], // analyze remediation
+      ['PR created: https://github.com/owner/repo/pull/42'],
+    ]);
+    const gitFn = makeGitFn('feature/test-feature');
+
+    await executeJob(db, job, octokit, config, { spawnFn, gitFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed');
+
+    // pulls.create should NOT have been called
+    assert.equal(octokit.prs.length, 0, 'Should not create a second PR when one was already detected');
+
     cleanup(); repoCleanup();
   });
 });
