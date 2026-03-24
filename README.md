@@ -4,94 +4,99 @@ Watches for `[COCKPIT]`-prefixed GitHub Issues, runs the spec-kit pipeline insid
 
 **GitHub is the interface.** Open an issue from your phone, watch the comments roll in.
 
+## Prerequisites
+
+| Tool | Version | Required |
+|------|---------|----------|
+| Node.js | 18+ | Required |
+| git | any | Required |
+| `claude` (Claude Code CLI) | latest | Required |
+| `uv` | any | Optional (for spec-kit auto-install) |
+
+## Quick Start
+
+```bash
+npm install -g cockpit
+cockpit init
+cockpit status
+```
+
+Or non-interactive (for scripts/CI):
+
+```bash
+GITHUB_TOKEN=ghp_... \
+GITHUB_OWNER=myuser \
+GITHUB_REPOS=myuser/myrepo \
+REPO_LOCAL_PATHS='{"myuser/myrepo":"/home/user/repos/myrepo"}' \
+cockpit init --yes
+```
+
 ## How It Works
 
-1. Open an Issue in `mlopstapus/seamless` titled `[COCKPIT] <feature description>`
-2. Cockpit detects it within `GITHUB_POLL_INTERVAL` seconds
-3. Claude Code runs inside the local repo clone with `--dangerously-skip-permissions`
-4. Spec-kit stages run: `specify → clarify → plan → tasks → analyze → implement`
-5. During `clarify`, questions are posted as issue comments — answer from your phone
-6. Claude opens a PR and links it in the issue
+1. Open an Issue titled `[COCKPIT] <feature name>` in a watched repo
+2. Cockpit detects it within 30 seconds and posts an acknowledgement
+3. The spec-kit pipeline runs: `specify → clarify → plan → tasks → analyze → implement`
+4. Progress comments appear on the issue as each stage completes
+5. When done, a PR is opened and linked back to the issue
 
-## Setup
+## CLI
 
-### Prerequisites
-
-| Tool | Install | Purpose |
-|------|---------|---------|
-| `docker` | [docs.docker.com](https://docs.docker.com/engine/install/) | Runs Redis |
-| `gh` | `apt install gh` | GitHub CLI — used by spec-kit to open PRs |
-| `claude` | `npm install -g @anthropic-ai/claude-code` | Claude Code CLI |
-| Python 3.12+ | system | API runtime |
-
-### 1. Clone and configure
-
-```bash
-git clone https://github.com/mlopstapus/cockpit ~/repos/cockpit
-cd ~/repos/cockpit
-cp .env.example .env
-# Edit .env — at minimum set GITHUB_TOKEN
+```
+cockpit init [--yes]              Setup wizard (writes ~/.cockpit/config.json + service file)
+cockpit start                     Start the background daemon
+cockpit stop                      Stop the background daemon
+cockpit restart                   Restart the background daemon
+cockpit status                    Show daemon health, active job, watched repos
+cockpit logs [job-id] [-n N]      Tail daemon logs or a specific job's log
+cockpit repos list                List watched repos
+cockpit repos add <repo> <path>   Add a repo to watch (owner/name format)
+cockpit repos remove <repo>       Remove a repo
+cockpit token                     Rotate the GitHub personal access token
 ```
 
-### 2. Start Redis
+## Configuration
 
-```bash
-docker-compose up -d
+Config lives at `~/.cockpit/config.json` (permissions: 600).
+
+```json
+{
+  "githubToken": "ghp_...",
+  "githubOwner": "your-username",
+  "pollIntervalSeconds": 30,
+  "postImplementCommand": "",
+  "repos": [
+    { "repo": "owner/name", "localPath": "/path/to/local/clone" }
+  ]
+}
 ```
 
-### 3. Set up the Python venv
+The daemon re-reads config at the start of every poll cycle — no restart needed for changes.
 
-```bash
-cd backend
-python3 -m venv .venv
-.venv/bin/pip3 install -r requirements.txt
+## Issue Naming
+
+```
+[COCKPIT] <feature description>
 ```
 
-### 4. Install the systemd service
+Only issues opened by the configured `githubOwner` are processed. Examples:
+- `[COCKPIT] add user authentication`
+- `[COCKPIT] fix onboarding crash`
+
+## Development
 
 ```bash
-# Replace ben-anderson with your Linux username
-cd /home/ben-anderson/repos/cockpit
-sudo cp cockpit-api.service /etc/systemd/system/cockpit-api@.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now cockpit-api@ben-anderson
-```
-
-### 5. Verify
-
-```bash
-sudo systemctl status cockpit-api@ben-anderson
-journalctl -u cockpit-api@ben-anderson -f
+git clone https://github.com/yourorg/cockpit
+cd cockpit
+npm install
+npm test          # run unit + integration tests
+npm run build     # verify native modules (better-sqlite3, node-pty)
+npm run lint      # ESLint
 ```
 
 ## Architecture
 
-```
-GitHub Issue ([COCKPIT] ...)
-  ↓ polling (GithubWatcher)
-Redis job queue
-  ↓ dequeue (PipelineRunner)
-Claude Code --dangerously-skip-permissions
-  in ~/repos/seamless
-  ↓ spec-kit stages
-Issue comments (progress + clarify Q&A)
-  ↓ implement stage
-PR created by Claude → linked in issue
-```
-
-Redis runs in Docker. The API runs as a systemd service on the host so Claude has a real TTY and direct access to local repos.
-
-## Ops
-
-```bash
-sudo systemctl restart cockpit-api@<user>
-journalctl -u cockpit-api@<user> -f      # tail logs
-docker-compose restart                    # restart Redis
-```
-
-## Testing
-
-```bash
-cd backend
-.venv/bin/pytest tests/ -q
-```
+- **No Docker, no Redis, no Python** — pure Node.js 18+ with SQLite
+- **Service manager**: systemd (Linux) or launchd (macOS)
+- **State**: `~/.cockpit/cockpit.db` (SQLite, WAL mode)
+- **PTY**: `node-pty` for real terminal spawning of Claude Code
+- **GitHub**: `@octokit/rest` with ETag caching (304s don't count against rate limits)

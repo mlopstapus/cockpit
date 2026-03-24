@@ -1,0 +1,17 @@
+[Unit]
+Description=Cockpit GitHub Issue Pipeline Daemon
+After=network.target
+
+[Service]
+Type=simple
+User={{USERNAME}}
+WorkingDirectory={{COCKPIT_DIR}}
+ExecStart={{NODE_PATH}} {{COCKPIT_DIR}}/src/daemon/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

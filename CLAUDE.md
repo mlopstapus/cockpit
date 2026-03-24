@@ -8,8 +8,8 @@ comments roll in.
 
 ## How It Works
 
-1. Open an **Issue** in `mlopstapus/seamless` titled `[COCKPIT] <feature-name>`
-2. Cockpit detects it within `GITHUB_POLL_INTERVAL` seconds
+1. Open an **Issue** in any watched repo titled `[COCKPIT] <feature-name>`
+2. Cockpit detects it within `pollIntervalSeconds` seconds (default: 30)
 3. Cockpit `cd`s into the local clone and spawns Claude with `--dangerously-skip-permissions`
 4. Spec-kit runs: `specify → clarify → plan → tasks → analyze → implement`
 5. During `clarify`, questions are posted as issue comments — answer from your phone
@@ -20,157 +20,141 @@ comments roll in.
 ```
 GitHub Issue ([COCKPIT] ...)
   ↓ polling (GithubWatcher)
-Redis job queue
-  ↓ dequeue (PipelineRunner)
+SQLite job queue (~/.cockpit/cockpit.db)
+  ↓ dequeue (PollLoop)
 Claude Code --dangerously-skip-permissions
-  in ~/repos/seamless (or configured target repo)
-  ↓ spec-kit stages
+  in the configured local repo clone
+  ↓ spec-kit stages (specify → clarify → plan → tasks → analyze → implement)
 Issue comments (stage transitions, clarify Q&A)
   ↓ implement stage
 PR created by Claude → linked in issue
 ```
 
-## Key Services
+## Key Modules
 
-| Service | File | Purpose |
-|---------|------|---------|
-| GithubWatcher | `services/github_watcher.py` | Polls GitHub issues, enqueues jobs |
-| JobStore | `services/job_store.py` | All Redis job state |
-| PipelineRunner | `services/pipeline_runner.py` | Sequential stage execution |
-| PRCommenter | `services/pr_commenter.py` | Posts stage comments to issue |
-| CommentRelay | `services/comment_relay.py` | Clarify Q&A, steering injection |
-| AccountRotator | `services/account_rotator.py` | Rate limit detection + rotation |
-| ClaudeProcess | `services/claude_process.py` | PTY-based Claude CLI wrapper |
+| Module | File | Purpose |
+|--------|------|---------|
+| CLI entry | `src/cli/index.js` | Commander root program, all subcommands |
+| Init wizard | `src/cli/init.js` | `cockpit init` TUI setup wizard |
+| Daemon entry | `src/daemon/index.js` | `start()`, crash recovery, PID file |
+| Poll loop | `src/daemon/poller.js` | Hot config reload, per-repo polling |
+| Job runner | `src/daemon/job-runner.js` | Dequeue + execute one job at a time |
+| Stage executor | `src/daemon/stage-executor.js` | Claude spawn, sentinel detection, commenting |
+| Claude process | `src/process/claude-process.js` | node-pty wrapper, LineBuffer, sentinel regex |
+| GitHub watcher | `src/github/watcher.js` | Poll issues, filter, sanitise, enqueue |
+| GitHub commenter | `src/github/commenter.js` | Post and list issue/PR comments |
+| Octokit client | `src/github/client.js` | ETag cache, RateLimitError |
+| DB schema | `src/db/index.js` | openDb, 6-table SQLite schema, WAL |
+| Jobs | `src/db/jobs.js` | enqueue/dequeue/mark* CRUD |
+| Logs | `src/db/logs.js` | appendLog, getLogTail, 1000-line buffer |
+| Config | `src/config/index.js` | readConfig, writeConfig (chmod 600), validate |
+| Daemon control | `src/cli/daemon-control.js` | start/stop/restart/status |
+| Logs CLI | `src/cli/logs.js` | `cockpit logs [job-id]` |
+| Repos CLI | `src/cli/repos.js` | `cockpit repos list/add/remove` |
+| Token CLI | `src/cli/token.js` | `cockpit token` rotation |
 
-## Configuration (env vars)
+## Configuration (`~/.cockpit/config.json`, chmod 600)
 
+```json
+{
+  "githubToken": "ghp_...",
+  "githubOwner": "your-username",
+  "pollIntervalSeconds": 30,
+  "postImplementCommand": "",
+  "repos": [
+    { "repo": "owner/name", "localPath": "/home/user/repos/name" }
+  ]
+}
 ```
-GITHUB_TOKEN          GitHub personal access token (repo scope)
-GITHUB_OWNER          Your GitHub username (e.g. mlopstapus)
-GITHUB_REPOS          Comma-separated repos to watch (e.g. mlopstapus/seamless or repo1,repo2)
-                      Do NOT use JSON array format — plain comma-separated only
-GITHUB_POLL_INTERVAL  Seconds between polls (default: 30)
-REDIS_URL             Redis connection (default: redis://redis:6379)
-REPO_LOCAL_PATHS      JSON map of "owner/repo" → local path
-                      e.g. '{"mlopstapus/seamless":"/home/ben/repos/seamless"}'
-PROFILES_DIR          Claude profile directory (default: ~/.claude-profiles)
-PR_COMMENTS_ENABLED   Set false to suppress issue comments (useful for testing)
-EXPO_RESTART_ENABLED  Set false to skip Expo dev server restart after implement (default: true)
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `githubToken` | required | GitHub PAT with `repo` scope |
+| `githubOwner` | required | Only issues from this account are processed |
+| `pollIntervalSeconds` | 30 | Seconds between GitHub polls |
+| `postImplementCommand` | "" | Shell command run after successful implement |
+| `repos` | required | Array of `{ repo, localPath }` |
+
+Config is re-read at the start of every poll cycle — no daemon restart needed for changes.
+
+## Install & Setup
+
+```bash
+# Prerequisites: Node.js 18+, git, claude (Claude Code CLI)
+npm install -g cockpit    # or: npm link (from repo root)
+cockpit init              # interactive TUI wizard
+cockpit status            # verify daemon is running
 ```
 
-## Installs & Dependencies
-
-Claude runs on the **host OS** (not in Docker), so any installs it performs happen on the host machine directly.
-
-### Target repo (e.g. `~/repos/seamless`)
-- **npm/yarn/expo packages**: `npm install <pkg>` or `yarn add <pkg>` — these go into the target repo's `node_modules` and update its `package.json`
-- **Python packages**: use the target repo's virtualenv if it has one, otherwise `pip install --user <pkg>`
-
-### Cockpit itself (`~/repos/cockpit`)
-- **Python deps**: add to `backend/requirements.txt`, then `cd backend && .venv/bin/pip install -r requirements.txt`
-- **System tools** (e.g. `gh`, `jq`): install via `apt` or the appropriate system package manager; document the dependency in this file
-
-### System-level tools
-If the pipeline needs a tool that isn't present on the host (e.g. `gh` CLI, `expo-cli`), install it system-wide and note it here so the host setup can be reproduced:
-
-| Tool | Install | Purpose |
-|------|---------|---------|
-| `gh` | `apt install gh` | GitHub CLI — used by spec-kit to open PRs |
-| `claude` | npm global | Claude Code CLI — spawned by PipelineRunner |
-| `node` / `npx` | nvm (see step 4) | Expo dev server |
-
-> **Note**: Docker services (Redis, API) cannot run installs that affect the host. If a new host dependency is needed, install it on the host and update this table.
+For non-interactive setup (CI/scripts):
+```bash
+GITHUB_TOKEN=ghp_... GITHUB_OWNER=myuser \
+GITHUB_REPOS=myuser/myrepo \
+REPO_LOCAL_PATHS='{"myuser/myrepo":"/home/user/repos/myrepo"}' \
+cockpit init --yes
+```
 
 ## Running
 
-Redis runs in Docker. The API runs as a systemd service on the host so that
-`claude` spawns with a real host PTY and repo paths resolve correctly.
-
-### 1. Start Redis
+The daemon runs as a background service (systemd on Linux, launchd on macOS).
+`cockpit init` writes and enables the service file automatically.
 
 ```bash
-docker-compose up -d
+cockpit start            # start daemon
+cockpit stop             # stop daemon
+cockpit restart          # restart daemon
+cockpit status           # health check + active job + watched repos
 ```
 
-### 2. Set up the API (first time)
+### Manual daemon start (development)
 
 ```bash
-cp .env.example .env               # fill in GITHUB_TOKEN, GITHUB_OWNER, etc.
-cd backend
-python -m venv .venv
-.venv/bin/pip install -r requirements.txt
+node src/daemon/index.js
 ```
 
-### 3. Install & enable the systemd service
+## CLI Reference
 
-The unit file is parameterised on the username via `systemctl --user` or the `%i` specifier:
-
-```bash
-# Replace <user> with your Linux username (e.g. ben-anderson)
-sudo cp cockpit-api.service /etc/systemd/system/cockpit-api@.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now cockpit-api@<user>
 ```
-
-### 4. Install & enable the Expo dev server (first time)
-
-**Prerequisite**: Node.js must be installed (nvm is recommended):
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-source ~/.bashrc   # or open a new shell
-nvm install --lts
-```
-
-The Expo dev server runs as a `--user` systemd service so Cockpit can restart it
-after each successful implement stage. It auto-detects the Tailscale IP so Expo Go
-on your phone can connect over Tailscale.
-
-```bash
-# Install as a user-level service (no sudo required)
-mkdir -p ~/.config/systemd/user
-cp seamless-expo.service ~/.config/systemd/user/seamless-expo.service
-systemctl --user daemon-reload
-systemctl --user enable --now seamless-expo
-```
-
-To view logs:
-```bash
-journalctl --user -u seamless-expo -f
-```
-
-On your phone: open Expo Go → enter URL manually: `exp://<tailscale-ip>:8081`
-
-### 5. Useful ops commands
-
-```bash
-sudo systemctl status cockpit-api@<user>
-journalctl -u cockpit-api@<user> -f          # tail logs
-sudo systemctl restart cockpit-api@<user>
+cockpit init [--yes] [--target <dir>]   Setup wizard
+cockpit start                           Start background daemon
+cockpit stop                            Stop background daemon
+cockpit restart                         Restart background daemon
+cockpit status                          Show health + active job
+cockpit logs [job-id] [-n <N>] [-f]     Tail logs
+cockpit repos list                      List watched repos
+cockpit repos add <owner/repo> <path>   Add repo
+cockpit repos remove <owner/repo>       Remove repo
+cockpit token                           Rotate GitHub token
 ```
 
 ## Testing
 
 ```bash
-cd backend
-.venv/bin/pytest tests/ -q
+npm test                  # run all tests (node:test)
+npm run build             # verify native modules compile (better-sqlite3, node-pty)
+npm run lint              # ESLint
 ```
 
 ## Tech Stack
 
-- **Backend**: FastAPI, Python, Redis
+- **Runtime**: Node.js 18+ ESM
 - **Agent**: Claude Code CLI (host PTY, `--dangerously-skip-permissions`)
-- **State**: Redis (jobs, logs, comment dedup)
-- **Access**: Tailscale
-- **Target repo**: `mlopstapus/seamless` (Expo/React Native mobile app)
+- **State**: SQLite via `better-sqlite3` (WAL mode, `~/.cockpit/cockpit.db`)
+- **PTY**: `node-pty` (real terminal for Claude Code)
+- **GitHub**: `@octokit/rest` with ETag caching
+- **CLI**: `commander@12`, `@clack/prompts`, `chalk`
+- **Service**: systemd (Linux) or launchd (macOS) — no Docker required
 
 ## Design Decisions
 
-- **Issues not PRs** — no need for code changes to trigger the pipeline; Claude creates the branch and PR
+- **Issues not PRs** — no code changes required to trigger the pipeline
 - **No frontend** — GitHub mobile is the interface
 - **No DAG** — sequential spec-kit stages only
 - **No auto-merge** — human reviews and merges PR
-- **Host execution** — API runs as a systemd service; Claude spawns on the real host OS (needs git, TTY, tools). Redis is the only Docker service.
+- **Host execution** — daemon runs directly on the host OS; Claude needs git, TTY, tools
 - **One job at a time** — FIFO queue, simpler and reliable
+- **Config hot-reload** — re-read config.json at start of each poll cycle; no IPC needed
+- **Zero external services** — no Redis, no Docker, no Python
 
 ## Issue Naming
 
@@ -179,4 +163,4 @@ cd backend
 ```
 Examples: `[COCKPIT] add user auth`, `[COCKPIT] fix onboarding crash`
 
-Only issues from `GITHUB_OWNER` are processed.
+Only issues from `githubOwner` are processed.
