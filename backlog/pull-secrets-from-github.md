@@ -1,0 +1,1 @@
+I'd like to be able to use secrets stored in the affected repo rather than have to save them in a .env file. This simplifies deployment and means we only need to give access to github via a PAT rather than have a bunch of secrets stored. 

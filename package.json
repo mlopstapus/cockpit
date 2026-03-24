@@ -1,0 +1,29 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "GitHub-native AI pipeline — open an issue, watch Claude build the feature",
+  "type": "module",
+  "bin": {
+    "cockpit": "src/cli/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "build": "node --input-type=commonjs -e \"require('better-sqlite3'); require('node-pty')\"",
+    "lint": "eslint src/ test/"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "@octokit/rest": "^21.0.0",
+    "better-sqlite3": "^11.0.0",
+    "chalk": "^5.0.0",
+    "commander": "^12.0.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "node-gyp": "^10.0.0"
+  }
+}

@@ -1,83 +1,102 @@
 # Cockpit
 
-Cockpit is a GitHub-native AI pipeline that watches for `[COCKPIT]`-prefixed issues in any GitHub repo, runs the full spec-kit pipeline (specify → clarify → plan → tasks → analyze → implement) inside your local repo clone, and posts progress back as issue comments — all powered by Claude Code.
+Watches for `[COCKPIT]`-prefixed GitHub Issues, runs the spec-kit pipeline inside the target repo, and posts progress back as issue comments.
 
-**Open an issue from your phone. Watch Claude build the feature.**
+**GitHub is the interface.** Open an issue from your phone, watch the comments roll in.
+
+## Prerequisites
+
+| Tool | Version | Required |
+|------|---------|----------|
+| Node.js | 18+ | Required |
+| git | any | Required |
+| `claude` (Claude Code CLI) | latest | Required |
+| `uv` | any | Optional (for spec-kit auto-install) |
 
 ## Quick Start
 
-### Prerequisites
+```bash
+npm install -g cockpit
+cockpit init
+cockpit status
+```
 
-| Tool | Install |
-|------|---------|
-| Node.js 18+ | `nvm install --lts` |
-| Python 3.11+ | system package manager |
-| `gh` | `apt install gh` |
-| `claude` | `npm install -g @anthropic-ai/claude-code` |
-| `uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-
-### 1. Clone and run setup
+Or non-interactive (for scripts/CI):
 
 ```bash
-git clone https://github.com/your-org/cockpit ~/repos/cockpit
-cd ~/repos/cockpit
-npm --prefix setup install
-node setup/index.js
+GITHUB_TOKEN=ghp_... \
+GITHUB_OWNER=myuser \
+GITHUB_REPOS=myuser/myrepo \
+REPO_LOCAL_PATHS='{"myuser/myrepo":"/home/user/repos/myrepo"}' \
+cockpit init --yes
 ```
 
-The interactive setup will:
-- Collect your GitHub token, repos to watch, and local repo paths
-- Write a `.env` file and a platform-appropriate service file (systemd or launchd)
-- Optionally install `specify-cli` (spec-kit) via `uv tool install`
+## How It Works
 
-### 2. Install the Python dependencies
+1. Open an Issue titled `[COCKPIT] <feature name>` in a watched repo
+2. Cockpit detects it within 30 seconds and posts an acknowledgement
+3. The spec-kit pipeline runs: `specify → clarify → plan → tasks → analyze → implement`
+4. Progress comments appear on the issue as each stage completes
+5. When done, a PR is opened and linked back to the issue
 
-```bash
-cd backend
-python -m venv .venv
-.venv/bin/pip install -r requirements.txt
+## CLI
+
+```
+cockpit init [--yes]              Setup wizard (writes ~/.cockpit/config.json + service file)
+cockpit start                     Start the background daemon
+cockpit stop                      Stop the background daemon
+cockpit restart                   Restart the background daemon
+cockpit status                    Show daemon health, active job, watched repos
+cockpit logs [job-id] [-n N]      Tail daemon logs or a specific job's log
+cockpit repos list                List watched repos
+cockpit repos add <repo> <path>   Add a repo to watch (owner/name format)
+cockpit repos remove <repo>       Remove a repo
+cockpit token                     Rotate the GitHub personal access token
 ```
 
-### 3. Start the service
+## Configuration
 
-**Linux**:
-```bash
-sudo cp cockpit-api@<user>.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now cockpit-api@<user>
+Config lives at `~/.cockpit/config.json` (permissions: 600).
+
+```json
+{
+  "githubToken": "ghp_...",
+  "githubOwner": "your-username",
+  "pollIntervalSeconds": 30,
+  "postImplementCommand": "",
+  "repos": [
+    { "repo": "owner/name", "localPath": "/path/to/local/clone" }
+  ]
+}
 ```
 
-**macOS**:
-```bash
-launchctl load ~/Library/LaunchAgents/com.cockpit.api.plist
-```
-
-### 4. Trigger the pipeline
-
-Open an issue in your watched repo:
-```
-[COCKPIT] <feature description>
-```
-
-Cockpit picks it up within `GITHUB_POLL_INTERVAL` seconds and starts the pipeline.
+The daemon re-reads config at the start of every poll cycle — no restart needed for changes.
 
 ## Issue Naming
 
 ```
-[COCKPIT] add user authentication
-[COCKPIT] fix checkout timeout bug
-[COCKPIT] refactor payment module
+[COCKPIT] <feature description>
 ```
 
-Only issues from `GITHUB_OWNER` are processed.
+Only issues opened by the configured `githubOwner` are processed. Examples:
+- `[COCKPIT] add user authentication`
+- `[COCKPIT] fix onboarding crash`
 
-## Documentation
-
-See [CLAUDE.md](CLAUDE.md) for full documentation: architecture, configuration reference, ops commands, and design decisions.
-
-## Testing
+## Development
 
 ```bash
-cd backend
-.venv/bin/pytest tests/ -q
+git clone https://github.com/yourorg/cockpit
+cd cockpit
+npm install
+npm test          # run unit + integration tests
+npm run build     # verify native modules (better-sqlite3, node-pty)
+npm run lint      # ESLint
 ```
+
+## Architecture
+
+- **No Docker, no Redis, no Python** — pure Node.js 18+ with SQLite
+- **Service manager**: systemd (Linux) or launchd (macOS)
+- **State**: `~/.cockpit/cockpit.db` (SQLite, WAL mode)
+- **PTY**: `node-pty` for real terminal spawning of Claude Code
+- **GitHub**: `@octokit/rest` with ETag caching (304s don't count against rate limits)
