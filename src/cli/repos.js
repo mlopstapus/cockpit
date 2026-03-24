@@ -10,11 +10,13 @@ export function repoList(configDir, logger = console) {
   logger.log('Watched repos:');
   for (const r of config.repos) {
     const exists = fs.existsSync(r.localPath);
-    logger.log(`  ${r.repo}  →  ${r.localPath}  [${exists ? 'exists' : 'missing'}]`);
+    let line = `  ${r.repo}  →  ${r.localPath}  [${exists ? 'exists' : 'missing'}]`;
+    if (r.startupCommand) line += `\n    startup: ${r.startupCommand}`;
+    logger.log(line);
   }
 }
 
-export function repoAdd(configDir, repoName, localPath, logger = {}) {
+export function repoAdd(configDir, repoName, localPath, options = {}, logger = {}) {
   const log = logger.log ? (m) => logger.log(m) : (m) => console.log(m);
   const warn = logger.warn ? (m) => logger.warn(m) : (m) => console.warn(m);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repoName)) {
@@ -28,11 +30,21 @@ export function repoAdd(configDir, repoName, localPath, logger = {}) {
   const config = readConfig(configDir);
   const existing = config.repos.find(r => r.repo === repoName);
   if (existing) {
-    warn(`Repo '${repoName}' is already configured.`);
+    if (options.startupCommand !== undefined) {
+      existing.startupCommand = options.startupCommand;
+      writeConfig(configDir, config);
+      log(`Updated ${repoName} startupCommand`);
+    } else {
+      warn(`Repo '${repoName}' is already configured.`);
+    }
     return;
   }
 
-  config.repos.push({ repo: repoName, localPath });
+  config.repos.push({
+    repo: repoName,
+    localPath,
+    ...(options.startupCommand ? { startupCommand: options.startupCommand } : {}),
+  });
   writeConfig(configDir, config);
   log(`Added ${repoName} → ${localPath}`);
 }

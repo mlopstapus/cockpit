@@ -5,6 +5,8 @@ import { startDaemon, stopDaemon, restartDaemon, showStatus } from './daemon-con
 import { showLogs } from './logs.js';
 import { repoList, repoAdd, repoRemove } from './repos.js';
 import { rotateToken } from './token.js';
+import { listRecent } from '../db/jobs.js';
+import chalk from 'chalk';
 import { expandHome, readConfig } from '../config/index.js';
 import { openDb } from '../db/index.js';
 import path from 'node:path';
@@ -104,7 +106,8 @@ repos
 repos
   .command('add <repo> <local-path>')
   .description('Add a repo to the watch list (owner/name format)')
-  .action((repo, localPath) => repoAdd(COCKPIT_DIR, repo, localPath));
+  .option('--startup-command <cmd>', 'shell command to run after implement stage')
+  .action((repo, localPath, opts) => repoAdd(COCKPIT_DIR, repo, localPath, { startupCommand: opts.startupCommand }));
 
 repos
   .command('remove <repo>')
@@ -115,6 +118,25 @@ repos
     } catch (err) {
       console.error(err.message);
       process.exit(1);
+    }
+  });
+
+// cockpit jobs
+program
+  .command('jobs')
+  .description('List recent jobs')
+  .option('-n <count>', 'Number of jobs to show', '20')
+  .action((opts) => {
+    const db = openDbSafe();
+    if (!db) { console.error('No database found. Run cockpit init first.'); process.exit(1); }
+    const jobs = listRecent(db, parseInt(opts.n, 10));
+    db.close();
+    if (jobs.length === 0) { console.log('No jobs found.'); return; }
+    for (const j of jobs) {
+      const statusColor = { active: chalk.yellow, completed: chalk.green, failed: chalk.red, queued: chalk.blue }[j.status] || chalk.white;
+      const ts = new Date(j.created_at).toLocaleString();
+      console.log(`${chalk.bold(j.id)}  ${statusColor(j.status.padEnd(9))}  ${ts}  ${j.spec_name}`);
+      if (j.error) console.log(`  ${chalk.red('error:')} ${j.error}`);
     }
   });
 

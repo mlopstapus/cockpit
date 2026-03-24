@@ -25,7 +25,7 @@ describe('repoAdd', () => {
     const dir = makeTempDir();
     writeConfig(dir, makeConfig([{ repo: 'owner/existing', localPath: dir }]));
     const warnings = [];
-    repoAdd(dir, 'owner/newrepo', dir, { warn: (m) => warnings.push(m) });
+    repoAdd(dir, 'owner/newrepo', dir, {}, { warn: (m) => warnings.push(m) });
     const config = readConfig(dir);
     assert.ok(config.repos.some(r => r.repo === 'owner/newrepo'));
     fs.rmSync(dir, { recursive: true });
@@ -35,7 +35,7 @@ describe('repoAdd', () => {
     const dir = makeTempDir();
     writeConfig(dir, makeConfig([]));
     const warnings = [];
-    repoAdd(dir, 'owner/repo', '/nonexistent/path/xyz', { warn: (m) => warnings.push(m) });
+    repoAdd(dir, 'owner/repo', '/nonexistent/path/xyz', {}, { warn: (m) => warnings.push(m) });
     const config = readConfig(dir);
     assert.ok(config.repos.some(r => r.repo === 'owner/repo'));
     assert.ok(warnings.some(w => w.includes('nonexistent') || w.includes('does not exist')));
@@ -77,6 +77,86 @@ describe('repoList', () => {
     const joined = output.join('\n');
     assert.ok(joined.includes('exists'));
     assert.ok(joined.includes('missing'));
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('displays startupCommand when set', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([
+      { repo: 'owner/repo', localPath: dir, startupCommand: 'npm start' },
+    ]));
+    const output = [];
+    repoList(dir, { log: (m) => output.push(m) });
+    const joined = output.join('\n');
+    assert.ok(joined.includes('npm start'), 'Expected startupCommand to appear in output');
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('does not display startup line when startupCommand is absent', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([
+      { repo: 'owner/repo', localPath: dir },
+    ]));
+    const output = [];
+    repoList(dir, { log: (m) => output.push(m) });
+    const joined = output.join('\n');
+    assert.ok(!joined.includes('startup'), 'Should not show startup line when not set');
+    fs.rmSync(dir, { recursive: true });
+  });
+});
+
+// ---------- T011: startup command CLI tests ----------
+
+describe('repoAdd — startupCommand', () => {
+  test('stores startupCommand when options.startupCommand is set', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([]));
+    repoAdd(dir, 'owner/repo', dir, { startupCommand: 'npm run start' });
+    const config = readConfig(dir);
+    const repo = config.repos.find(r => r.repo === 'owner/repo');
+    assert.ok(repo, 'Repo should be added');
+    assert.equal(repo.startupCommand, 'npm run start');
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('stores repo without startupCommand field when options.startupCommand is absent', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([]));
+    repoAdd(dir, 'owner/repo', dir, {});
+    const config = readConfig(dir);
+    const repo = config.repos.find(r => r.repo === 'owner/repo');
+    assert.ok(repo, 'Repo should be added');
+    assert.ok(!('startupCommand' in repo), 'startupCommand should not be present');
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('updates startupCommand in-place when repo already exists and options.startupCommand provided', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([{ repo: 'owner/repo', localPath: dir }]));
+    repoAdd(dir, 'owner/repo', dir, { startupCommand: 'echo updated' });
+    const config = readConfig(dir);
+    const repos = config.repos.filter(r => r.repo === 'owner/repo');
+    assert.equal(repos.length, 1, 'Should not duplicate repo');
+    assert.equal(repos[0].startupCommand, 'echo updated');
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('warns and returns when repo already exists and no startupCommand provided', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([{ repo: 'owner/repo', localPath: dir }]));
+    const warnings = [];
+    repoAdd(dir, 'owner/repo', dir, {}, { warn: (m) => warnings.push(m) });
+    assert.ok(warnings.some(w => w.includes('already configured') || w.includes('owner/repo')));
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('stores startupCommand with spaces and special chars verbatim', () => {
+    const dir = makeTempDir();
+    writeConfig(dir, makeConfig([]));
+    const cmd = 'npm run build && echo "done $PWD"';
+    repoAdd(dir, 'owner/repo', dir, { startupCommand: cmd });
+    const config = readConfig(dir);
+    assert.equal(config.repos.find(r => r.repo === 'owner/repo').startupCommand, cmd);
     fs.rmSync(dir, { recursive: true });
   });
 });

@@ -4,19 +4,15 @@ import os from 'node:os';
 import { openDb } from '../db/index.js';
 import { readConfig, validateConfig, expandHome } from '../config/index.js';
 import { startPollLoop } from './poller.js';
+import { requeueInterrupted } from '../db/jobs.js';
 
 const COCKPIT_DIR = expandHome('~/.cockpit');
 const PID_FILE = path.join(COCKPIT_DIR, 'daemon.pid');
 const DB_PATH = path.join(COCKPIT_DIR, 'cockpit.db');
 
 export function recoverCrashedJobs(db) {
-  db.prepare(`
-    UPDATE jobs
-    SET status = 'failed',
-        error  = 'daemon restarted while job was active',
-        updated_at = ?
-    WHERE status = 'active'
-  `).run(new Date().toISOString());
+  // Re-queue interrupted jobs so they resume from the last started stage
+  requeueInterrupted(db);
 }
 
 export async function start() {
@@ -57,4 +53,10 @@ export async function start() {
   console.log(`Cockpit daemon started (PID ${process.pid})`);
 
   await startPollLoop(db, { getShuttingDown: () => shuttingDown });
+}
+
+// Run when invoked directly (by launchd, systemd, or CLI)
+import { fileURLToPath } from 'node:url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  start();
 }
