@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Unique label for this launchd job -->
+  <key>Label</key>
+  <string>com.cockpit.api</string>
+
+  <!-- Command and arguments to run uvicorn -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{COCKPIT_DIR}}/backend/.venv/bin/uvicorn</string>
+    <string>main:app</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>8000</string>
+    <string>--app-dir</string>
+    <string>{{COCKPIT_DIR}}/backend</string>
+  </array>
+
+  <!-- Working directory (Cockpit repo root) -->
+  <key>WorkingDirectory</key>
+  <string>{{COCKPIT_DIR}}/backend</string>
+
+  <!-- Environment variables (mirrors .env keys; fill from generated .env) -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GITHUB_TOKEN</key>
+    <string>{{GITHUB_TOKEN}}</string>
+    <key>GITHUB_OWNER</key>
+    <string>{{GITHUB_OWNER}}</string>
+    <key>GITHUB_REPOS</key>
+    <string>{{GITHUB_REPOS}}</string>
+    <key>REPO_LOCAL_PATHS</key>
+    <string>{{REPO_LOCAL_PATHS}}</string>
+    <key>GITHUB_POLL_INTERVAL</key>
+    <string>30</string>
+    <key>DB_PATH</key>
+    <string>{{DB_PATH}}</string>
+    <key>POST_IMPLEMENT_COMMAND</key>
+    <string>{{POST_IMPLEMENT_COMMAND}}</string>
+    <key>PR_COMMENTS_ENABLED</key>
+    <string>true</string>
+    <key>DEBUG</key>
+    <string>false</string>
+  </dict>
+
+  <!-- Start on login and keep alive on crash -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Log output paths ({{HOME}} = user home directory) -->
+  <key>StandardOutPath</key>
+  <string>{{HOME}}/Library/Logs/cockpit-api.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{HOME}}/Library/Logs/cockpit-api-error.log</string>
+</dict>
+</plist>

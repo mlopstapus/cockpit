@@ -1,4 +1,4 @@
-"""Dequeues jobs from Redis and runs spec-kit stages sequentially via PTY."""
+"""Dequeues jobs from the job store and runs spec-kit stages sequentially via PTY."""
 import asyncio
 import logging
 import re
@@ -49,15 +49,8 @@ STAGES = [
     Stage("implement", "/speckit.implement"),
 ]
 
-# Expo dev server restart command — run after implement if configured.
-# Uses systemctl --user so no sudo required.
-_EXPO_RESTART_CMD = [
-    "systemctl", "--user", "restart", "seamless-expo",
-]
-
-
 class PipelineRunner:
-    """Runs spec-kit pipeline for jobs dequeued from Redis."""
+    """Runs spec-kit pipeline for jobs dequeued from the job store."""
 
     def __init__(
         self,
@@ -172,8 +165,7 @@ class PipelineRunner:
                         registered_at=datetime.utcnow(),
                     ))
 
-            if settings.expo_restart_enabled:
-                await self._restart_expo(job)
+            await self._run_post_implement_hook(job)
 
         except Exception as e:
             logger.error(f"Pipeline error for job {job.id}: {e}", exc_info=True)
@@ -297,24 +289,45 @@ class PipelineRunner:
         await self._job_store.update(job.id, status=JobStatus.RUNNING)
         return "No clarification received — proceed with best-effort assumptions."
 
-    async def _restart_expo(self, job) -> None:
-        """Restart the seamless-expo systemd user service after a successful implement."""
+    async def _run_post_implement_hook(self, job) -> None:
+        """Execute POST_IMPLEMENT_COMMAND (if set) after a successful implement stage.
+        Hook failures never propagate — pipeline always completes successfully."""
+        cmd = settings.post_implement_command
+        if not cmd:
+            return
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *_EXPO_RESTART_CMD,
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                cwd=job.repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            if proc.returncode == 0:
-                logger.info(f"Job {job.id}: Expo dev server restarted")
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                logger.warning(f"Job {job.id}: post-implement hook timed out after 30s")
                 await self._pr_commenter.post_comment(
-                    job, "📱 Expo dev server restarted — open Expo Go and connect via Tailscale."
+                    job, "⚠️ Post-implement hook timed out after 30s."
+                )
+                return
+
+            if proc.returncode == 0:
+                logger.info(f"Job {job.id}: post-implement hook ran successfully")
+                await self._pr_commenter.post_comment(
+                    job, "✅ Post-implement hook ran successfully."
                 )
             else:
-                logger.warning(f"Job {job.id}: Expo restart failed: {stderr.decode()[:200]}")
+                stderr_snippet = stderr.decode(errors="replace")[:200]
+                logger.warning(f"Job {job.id}: post-implement hook failed (exit {proc.returncode}): {stderr_snippet}")
+                await self._pr_commenter.post_comment(
+                    job, f"⚠️ Post-implement hook failed (exit `{proc.returncode}`): `{stderr_snippet}`"
+                )
         except Exception as e:
-            logger.warning(f"Job {job.id}: Expo restart error: {e}")
+            logger.warning(f"Job {job.id}: post-implement hook error: {e}")
 
     @staticmethod
     def _stage_complete(stage_name: str, text: str) -> bool:

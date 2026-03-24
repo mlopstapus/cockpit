@@ -1,93 +1,79 @@
 # Cockpit
 
-Watches for `[COCKPIT]`-prefixed GitHub Issues, runs the spec-kit pipeline inside the target repo, and posts progress back as issue comments.
+Cockpit is a GitHub-native AI pipeline that watches for `[COCKPIT]`-prefixed issues in any GitHub repo, runs the full spec-kit pipeline (specify → clarify → plan → tasks → analyze → implement) inside your local repo clone, and posts progress back as issue comments — all powered by Claude Code.
 
-**GitHub is the interface.** Open an issue from your phone, watch the comments roll in.
+**Open an issue from your phone. Watch Claude build the feature.**
 
-## How It Works
-
-1. Open an Issue in `mlopstapus/seamless` titled `[COCKPIT] <feature description>`
-2. Cockpit detects it within `GITHUB_POLL_INTERVAL` seconds
-3. Claude Code runs inside the local repo clone with `--dangerously-skip-permissions`
-4. Spec-kit stages run: `specify → clarify → plan → tasks → analyze → implement`
-5. During `clarify`, questions are posted as issue comments — answer from your phone
-6. Claude opens a PR and links it in the issue
-
-## Setup
+## Quick Start
 
 ### Prerequisites
 
-| Tool | Install | Purpose |
-|------|---------|---------|
-| `docker` | [docs.docker.com](https://docs.docker.com/engine/install/) | Runs Redis |
-| `gh` | `apt install gh` | GitHub CLI — used by spec-kit to open PRs |
-| `claude` | `npm install -g @anthropic-ai/claude-code` | Claude Code CLI |
-| Python 3.12+ | system | API runtime |
+| Tool | Install |
+|------|---------|
+| Node.js 18+ | `nvm install --lts` |
+| Python 3.11+ | system package manager |
+| `gh` | `apt install gh` |
+| `claude` | `npm install -g @anthropic-ai/claude-code` |
+| `uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 
-### 1. Clone and configure
+### 1. Clone and run setup
 
 ```bash
-git clone https://github.com/mlopstapus/cockpit ~/repos/cockpit
+git clone https://github.com/your-org/cockpit ~/repos/cockpit
 cd ~/repos/cockpit
-cp .env.example .env
-# Edit .env — at minimum set GITHUB_TOKEN
+npm --prefix setup install
+node setup/index.js
 ```
 
-### 2. Start Redis
+The interactive setup will:
+- Collect your GitHub token, repos to watch, and local repo paths
+- Write a `.env` file and a platform-appropriate service file (systemd or launchd)
+- Optionally install `specify-cli` (spec-kit) via `uv tool install`
 
-```bash
-docker-compose up -d
-```
-
-### 3. Set up the Python venv
+### 2. Install the Python dependencies
 
 ```bash
 cd backend
-python3 -m venv .venv
-.venv/bin/pip3 install -r requirements.txt
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-### 4. Install the systemd service
+### 3. Start the service
 
+**Linux**:
 ```bash
-# Replace ben-anderson with your Linux username
-cd /home/ben-anderson/repos/cockpit
-sudo cp cockpit-api.service /etc/systemd/system/cockpit-api@.service
+sudo cp cockpit-api@<user>.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now cockpit-api@ben-anderson
+sudo systemctl enable --now cockpit-api@<user>
 ```
 
-### 5. Verify
-
+**macOS**:
 ```bash
-sudo systemctl status cockpit-api@ben-anderson
-journalctl -u cockpit-api@ben-anderson -f
+launchctl load ~/Library/LaunchAgents/com.cockpit.api.plist
 ```
 
-## Architecture
+### 4. Trigger the pipeline
 
+Open an issue in your watched repo:
 ```
-GitHub Issue ([COCKPIT] ...)
-  ↓ polling (GithubWatcher)
-Redis job queue
-  ↓ dequeue (PipelineRunner)
-Claude Code --dangerously-skip-permissions
-  in ~/repos/seamless
-  ↓ spec-kit stages
-Issue comments (progress + clarify Q&A)
-  ↓ implement stage
-PR created by Claude → linked in issue
+[COCKPIT] <feature description>
 ```
 
-Redis runs in Docker. The API runs as a systemd service on the host so Claude has a real TTY and direct access to local repos.
+Cockpit picks it up within `GITHUB_POLL_INTERVAL` seconds and starts the pipeline.
 
-## Ops
+## Issue Naming
 
-```bash
-sudo systemctl restart cockpit-api@<user>
-journalctl -u cockpit-api@<user> -f      # tail logs
-docker-compose restart                    # restart Redis
 ```
+[COCKPIT] add user authentication
+[COCKPIT] fix checkout timeout bug
+[COCKPIT] refactor payment module
+```
+
+Only issues from `GITHUB_OWNER` are processed.
+
+## Documentation
+
+See [CLAUDE.md](CLAUDE.md) for full documentation: architecture, configuration reference, ops commands, and design decisions.
 
 ## Testing
 

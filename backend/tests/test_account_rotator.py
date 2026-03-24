@@ -40,8 +40,13 @@ def test_get_best_account_returns_available():
 
 
 def test_rotate_skips_rate_limited():
+    from config import AccountConfig
+    from services.account_rotator import AccountState
     rotator = AccountRotator()
-    # Mark primary as rate limited
+    # Add a secondary account so rotation has somewhere to go
+    secondary_cfg = AccountConfig(id="secondary", name="Secondary", config_dir="~/.claude", priority=2)
+    rotator.accounts["secondary"] = AccountState(secondary_cfg)
+    # Mark primary as rate limited — should fall back to secondary
     rotator.mark_rate_limited("primary", retry_after_seconds=9999)
     account = rotator.get_best_account()
     assert account.id == "secondary"
