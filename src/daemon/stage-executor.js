@@ -10,6 +10,66 @@ import { markFailed, markComplete, markStage } from '../db/jobs.js';
 
 const execFileAsync = promisify(execFile);
 
+// Attempt to push the current branch and open a draft PR via the GitHub API.
+// Best-effort — returns the PR URL on success, null on any failure.
+// gitFn defaults to execFileAsync (injectable for tests).
+async function ensurePrExists(repoPath, job, octokit, db, log, gitFn = execFileAsync) {
+  // 1. Get current branch name
+  let branch;
+  try {
+    const { stdout } = await gitFn('git', ['branch', '--show-current'], { cwd: repoPath, timeout: 10000 });
+    branch = stdout.trim();
+  } catch (err) {
+    log(`[cockpit] ensurePrExists: could not get branch name: ${err.message}`);
+    return null;
+  }
+
+  if (!branch || branch === 'main' || branch === 'master') {
+    log(`[cockpit] ensurePrExists: on default branch "${branch || '(none)'}" — skipping draft PR`);
+    return null;
+  }
+
+  // 2. Commit any uncommitted work and push
+  try {
+    await gitFn('/bin/sh', ['-c',
+      'git add -A && (git commit -m "WIP: partial implementation" 2>/dev/null || true) && git push -u origin HEAD'
+    ], { cwd: repoPath, timeout: 60000 });
+  } catch (err) {
+    log(`[cockpit] ensurePrExists: git push failed: ${err.message}`);
+    return null;
+  }
+
+  // 3. Create draft PR via GitHub API
+  const [owner, repo] = job.github_repo.split('/');
+  let prUrl;
+  try {
+    const { data } = await octokit.pulls.create({
+      owner,
+      repo,
+      title: `[WIP] ${job.spec_name}`,
+      head: branch,
+      base: 'main',
+      body: `Draft PR for issue #${job.issue_number}: ${job.spec_name}\n\nPartial implementation — created automatically by Cockpit.`,
+      draft: true,
+    });
+    prUrl = data.html_url;
+    registerActivePr(db, {
+      github_repo: job.github_repo,
+      pr_number: data.number,
+      job_id: job.id,
+      issue_number: job.issue_number,
+      repo_path: job.repo_path,
+      registered_at: new Date().toISOString(),
+    });
+    log(`[cockpit] ensurePrExists: draft PR created: ${prUrl}`);
+  } catch (err) {
+    log(`[cockpit] ensurePrExists: could not create PR: ${err.message}`);
+    return null;
+  }
+
+  return prUrl;
+}
+
 export function redactSecrets(line, token) {
   if (!token || !line) return line;
   return line.split(token).join('[REDACTED]');
@@ -178,6 +238,7 @@ async function runClarifyLoop(claudeBin, repoPath, firstOutput, octokit, repoFul
 export async function executeJob(db, job, octokit, config, opts = {}) {
   const claudeBin = opts.claudeBin || 'claude';
   const spawnFn = opts.spawnFn || null;
+  const gitFn = opts.gitFn || execFileAsync;
 
   const isResume = job.stage && job.stage !== 'idle';
 
@@ -199,6 +260,8 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
   const resumeIdx = resumeFromStage ? STAGES.findIndex(s => s.name === resumeFromStage) : 0;
   if (resumeFromStage) log(`[cockpit] Resuming from stage: ${resumeFromStage}`);
 
+  let prUrl = null;
+
   for (const stage of STAGES) {
     const stageIdx = STAGES.findIndex(s => s.name === stage.name);
     if (stageIdx < resumeIdx) continue; // skip already-completed stages
@@ -209,7 +272,6 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
     const isFirstStage = stage.name === 'specify' && !resumeFromStage;
     markStage(db, job.id, stage.name);
     const stageStartMs = Date.now();
-    let prUrl = null;
     let stageOutput = '';
 
     try {
@@ -235,10 +297,18 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
       }, { continueSession: !isFirstStage, spawnFn });
     } catch (err) {
       log(`[cockpit] Stage ${stage.name} failed: ${err.message}`);
+      let draftPrLine = '';
+      if (stage.name === 'implement') {
+        log(`[cockpit] Implement failed — pushing branch and opening draft PR with partial work…`);
+        const draftUrl = await ensurePrExists(job.repo_path, job, octokit, db, log, gitFn);
+        if (draftUrl) {
+          draftPrLine = `\n\nA draft PR with partial work has been opened: ${draftUrl}`;
+        }
+      }
       markFailed(db, job.id, `Stage ${stage.name} failed: ${err.message}`);
       await postIssueComment(
         octokit, job.github_repo, job.issue_number,
-        `❌ **Stage ${STAGE_LABELS[stage.name] || stage.name} failed**: ${err.message}\n\nCheck \`cockpit logs ${job.id}\` for details.`
+        `❌ **Stage ${STAGE_LABELS[stage.name] || stage.name} failed**: ${err.message}${draftPrLine}\n\nCheck \`cockpit logs ${job.id}\` for details.`
       ).catch(() => {});
       return;
     }
@@ -268,6 +338,17 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
       octokit, job.github_repo, job.issue_number,
       `✅ **Stage complete**: ${STAGE_LABELS[stage.name] || stage.name}`
     ).catch(err => console.error(`Failed to post stage comment: ${err.message}`));
+  }
+
+  // Guarantee a PR exists after the pipeline — create a draft PR if Claude didn't open one.
+  if (!prUrl) {
+    log(`[cockpit] No PR detected in implement output — pushing branch and opening PR…`);
+    const fallbackUrl = await ensurePrExists(job.repo_path, job, octokit, db, log, gitFn);
+    if (fallbackUrl) {
+      prUrl = fallbackUrl;
+      await postIssueComment(octokit, job.github_repo, job.issue_number, `🎉 **PR opened**: ${fallbackUrl}`)
+        .catch(() => {});
+    }
   }
 
   markComplete(db, job.id);

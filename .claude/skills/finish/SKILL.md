@@ -76,7 +76,14 @@ Never `git add .`. Never stage `.env` or secrets. Use conventional commit format
 - Update skill files with improvements
 - Document learnings in memory
 
-### 7. Confirm
+### 7. Restart daemon (cockpit projects only)
+If working in the cockpit repo itself, restart the daemon so new schema tables and code take effect:
+```bash
+cockpit restart && sleep 3 && cockpit status
+```
+Verify PID is non-zero in `launchctl list | grep cockpit`. New `CREATE TABLE IF NOT EXISTS` tables in `src/db/index.js` apply automatically on restart.
+
+### 8. Confirm
 Tell user: "Shipped! PR: <url>"
 
 ## Notes
