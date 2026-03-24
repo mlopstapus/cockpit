@@ -1,4 +1,13 @@
 import pty from 'node-pty';
+import { execSync } from 'node:child_process';
+
+function resolveClaudeBinary() {
+  try {
+    return execSync('which claude', { encoding: 'utf8' }).trim();
+  } catch {
+    return 'claude';
+  }
+}
 
 // ─── Sentinel detection ───────────────────────────────────────────────────────
 
@@ -58,7 +67,8 @@ export function createClaudeProcess(ptyModule = pty) {
     const args = ['--dangerously-skip-permissions', ...extraArgs];
     if (configDir) args.unshift('--config', configDir);
 
-    const ptyProcess = ptyModule.spawn('claude', args, {
+    const claudeBin = resolveClaudeBinary();
+    const ptyProcess = ptyModule.spawn(claudeBin, args, {
       name: 'xterm-256color',
       cols: 200,
       rows: 50,

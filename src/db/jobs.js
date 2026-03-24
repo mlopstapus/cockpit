@@ -42,6 +42,21 @@ export function markActive(db, id) {
   ).run(new Date().toISOString(), id);
 }
 
+export function markStage(db, id, stage) {
+  db.prepare(
+    "UPDATE jobs SET stage = ?, updated_at = ? WHERE id = ?"
+  ).run(stage, new Date().toISOString(), id);
+}
+
+export function requeueInterrupted(db) {
+  db.prepare(`
+    UPDATE jobs
+    SET status = 'queued',
+        updated_at = ?
+    WHERE status = 'active'
+  `).run(new Date().toISOString());
+}
+
 export function markComplete(db, id) {
   db.prepare(
     "UPDATE jobs SET status = 'completed', stage = 'done', updated_at = ? WHERE id = ?"

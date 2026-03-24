@@ -31,7 +31,7 @@ function makeJob(overrides = {}) {
 }
 
 describe('recoverCrashedJobs', () => {
-  test('active jobs at startup are transitioned to failed', () => {
+  test('active jobs at startup are re-queued for resume', () => {
     const { db, cleanup } = makeTempDb();
 
     const job1 = makeJob();
@@ -45,10 +45,8 @@ describe('recoverCrashedJobs', () => {
 
     const updated1 = getJob(db, job1.id);
     const updated2 = getJob(db, job2.id);
-    assert.equal(updated1.status, 'failed');
-    assert.equal(updated2.status, 'failed');
-    assert.ok(updated1.error.includes('daemon restarted'));
-    assert.ok(updated2.error.includes('daemon restarted'));
+    assert.equal(updated1.status, 'queued');
+    assert.equal(updated2.status, 'queued');
 
     cleanup();
   });

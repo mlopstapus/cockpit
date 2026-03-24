@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,13 +9,20 @@ import { enqueueJob, makeJobId, getJob } from '../../src/db/jobs.js';
 import { getLogTail } from '../../src/db/logs.js';
 import { executeJob } from '../../src/daemon/stage-executor.js';
 
+// ---------- helpers ----------
+
 function makeTempDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-stage-test-'));
   const db = openDb(path.join(dir, 'test.db'));
   return { db, cleanup: () => { db.close(); fs.rmSync(dir, { recursive: true }); } };
 }
 
-function makeJob(overrides = {}) {
+function makeTempRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-repo-test-'));
+  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+function makeJob(repoPath, overrides = {}) {
   return {
     id: makeJobId(),
     github_repo: 'owner/repo',
@@ -22,7 +30,7 @@ function makeJob(overrides = {}) {
     issue_title: '[COCKPIT] test feature',
     issue_body: 'test',
     spec_name: 'test feature',
-    repo_path: '/repos/test',
+    repo_path: repoPath,
     stage: 'idle',
     status: 'queued',
     created_at: new Date().toISOString(),
@@ -45,227 +53,393 @@ function makeOctokit() {
   };
 }
 
-function makeConfig(token = 'ghp_testtoken123') {
+function makeConfig(token = 'ghp_testtoken123', overrides = {}) {
   return {
     githubToken: token,
     githubOwner: 'owner',
     pollIntervalSeconds: 30,
     postImplementCommand: '',
     repos: [{ repo: 'owner/repo', localPath: '/repos/test' }],
+    ...overrides,
   };
 }
 
-describe('executeJob — happy path (6 sentinels)', () => {
-  test('posts picked-up comment and stage comments', async () => {
-    const { db, cleanup } = makeTempDb();
-    const job = makeJob();
+// Create a child-process-style mock that emits lines then closes.
+function makeChildProcess(lines = [], exitCode = 0) {
+  const proc = new EventEmitter();
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = () => {};
+  setImmediate(() => {
+    for (const line of lines) proc.stdout.emit('data', Buffer.from(line + '\n'));
+    proc.emit('close', exitCode);
+  });
+  return proc;
+}
+
+// spawnFn factory: each call gets the next entry in perCallLines (wraps with empty array if exhausted).
+// clarifyCallIdx: the 0-based call index that is the clarify stage — auto-emits done signal.
+function makeSpawnFn(perCallLines = []) {
+  let call = 0;
+  return () => {
+    const lines = perCallLines[call] ?? [];
+    call++;
+    return makeChildProcess(lines, 0);
+  };
+}
+
+function makeFailingSpawnFn() {
+  return () => makeChildProcess([], 1);
+}
+
+// Pre-write artifact files so waitForArtifact returns immediately.
+function writeArtifacts(repoPath, ...filenames) {
+  for (const f of filenames) fs.writeFileSync(path.join(repoPath, f), `# ${f}\n`);
+}
+
+// ---------- Phase 1 baseline tests ----------
+
+describe('executeJob — happy path (6 stages)', () => {
+  test('posts picked-up comment and stage-complete comments for all stages', async () => {
+    const { db, cleanup: dbCleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
     enqueueJob(db, job);
     const octokit = makeOctokit();
     const config = makeConfig();
 
-    // Mock process that emits all 6 sentinels then exits 0
-    const mockSpawn = (_repoPath, _configDir, _args, _opts) => {
-      let dataHandler = null;
-      let exitHandler = null;
-      const pty = {
-        onData: (cb) => { dataHandler = cb; },
-        onExit: (cb) => { exitHandler = cb; },
-        write: () => {},
-        kill: () => {},
-      };
-      setImmediate(() => {
-        const sentinels = [
-          'spec.md written',
-          'no clarification needed',
-          'plan.md written',
-          'tasks.md written',
-          'analysis complete',
-          'pr created successfully',
-        ];
-        for (const line of sentinels) {
-          if (dataHandler) dataHandler(line + '\n');
-        }
-        if (exitHandler) exitHandler(0);
-      });
-      return pty;
-    };
+    // 6 stages; clarify (index 1) emits done signal so Q&A loop exits immediately
+    const spawnFn = makeSpawnFn([
+      [],                          // specify
+      ['no clarification needed'], // clarify
+      [],                          // plan
+      [],                          // tasks
+      [],                          // analyze
+      [],                          // implement
+    ]);
 
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
+    await executeJob(db, job, octokit, config, { spawnFn });
 
-    // Should have: 1 picked-up + 6 stage comments = 7+
+    // picked-up comment + 6 stage-complete comments = at least 7
     assert.ok(octokit.comments.length >= 7, `Expected >=7 comments, got ${octokit.comments.length}`);
-    assert.ok(octokit.comments[0].body.toLowerCase().includes('picked up') ||
-              octokit.comments[0].body.toLowerCase().includes('working on'));
-    cleanup();
+    const bodies = octokit.comments.map(c => c.body);
+    assert.ok(bodies[0].toLowerCase().includes('picked up') || bodies[0].toLowerCase().includes('running'));
+    assert.ok(bodies.some(b => b.includes('✅') && b.includes('implement')));
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed');
+
+    dbCleanup(); repoCleanup();
   });
 });
 
 describe('executeJob — failure path', () => {
   test('marks job failed and posts error comment on non-zero exit', async () => {
     const { db, cleanup } = makeTempDb();
-    const job = makeJob({ issue_number: 99 });
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 99 });
     enqueueJob(db, job);
     const octokit = makeOctokit();
     const config = makeConfig();
 
-    const mockSpawn = () => {
-      let exitHandler = null;
-      return {
-        onData: () => {},
-        onExit: (cb) => { exitHandler = cb; setImmediate(() => exitHandler && exitHandler(1)); },
-        write: () => {},
-        kill: () => {},
-      };
-    };
-
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
+    await executeJob(db, job, octokit, config, { spawnFn: makeFailingSpawnFn() });
 
     const updated = getJob(db, job.id);
     assert.equal(updated.status, 'failed');
-    assert.ok(octokit.comments.some(c => c.body.toLowerCase().includes('fail') ||
-                                         c.body.toLowerCase().includes('error')));
-    cleanup();
+    assert.ok(octokit.comments.some(c => c.body.includes('❌') || c.body.toLowerCase().includes('fail')));
+
+    cleanup(); repoCleanup();
   });
 });
 
 describe('executeJob — token redaction', () => {
   test('GitHub token is redacted in job logs', async () => {
     const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
     const token = 'ghp_supersecrettoken999';
-    const job = makeJob({ issue_number: 77 });
+    const job = makeJob(repoPath, { issue_number: 77 });
     enqueueJob(db, job);
     const octokit = makeOctokit();
     const config = makeConfig(token);
 
-    const mockSpawn = () => {
-      let dataHandler = null;
-      let exitHandler = null;
-      return {
-        onData: (cb) => { dataHandler = cb; },
-        onExit: (cb) => {
-          exitHandler = cb;
-          setImmediate(() => {
-            // Emit a line containing the token
-            if (dataHandler) dataHandler(`Using token ${token} for auth\n`);
-            if (exitHandler) exitHandler(0);
-          });
-        },
-        write: () => {},
-        kill: () => {},
-      };
-    };
+    // specify stage emits a line containing the token
+    const spawnFn = makeSpawnFn([
+      [`Using token ${token} for auth`], // specify
+      ['no clarification needed'],       // clarify
+      [], [], [], [],
+    ]);
 
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
+    await executeJob(db, job, octokit, config, { spawnFn });
 
     const logs = getLogTail(db, job.id, 100);
     for (const line of logs) {
       assert.ok(!line.includes(token), `Token found unredacted in: "${line}"`);
     }
     assert.ok(logs.some(l => l.includes('[REDACTED]')));
-    cleanup();
+
+    cleanup(); repoCleanup();
   });
 });
 
-// T053: post-implement hook tests
 describe('executeJob — post-implement hook', () => {
-  test('fires when postImplementCommand is set after implement sentinel', async () => {
+  test('fires when postImplementCommand is set after all stages complete', async () => {
     const { db, cleanup } = makeTempDb();
-    const job = makeJob({ issue_number: 300 });
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath, { issue_number: 300 });
     enqueueJob(db, job);
     const octokit = makeOctokit();
-    const config = { ...makeConfig(), postImplementCommand: 'echo "hook ran"' };
+    const config = makeConfig('ghp_test', { postImplementCommand: 'echo "hook ran"' });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
 
-    const mockSpawn = () => {
-      let dataHandler = null;
-      let exitHandler = null;
-      return {
-        onData: (cb) => { dataHandler = cb; },
-        onExit: (cb) => {
-          exitHandler = cb;
-          setImmediate(() => {
-            if (dataHandler) dataHandler('pr created successfully\n');
-            if (exitHandler) exitHandler(0);
-          });
-        },
-        write: () => {},
-        kill: () => {},
-      };
-    };
+    await executeJob(db, job, octokit, config, { spawnFn });
 
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
-
-    // Should have a ✅ hook comment
     assert.ok(octokit.comments.some(c => c.body.includes('✅') && c.body.toLowerCase().includes('hook')));
-    cleanup();
+    cleanup(); repoCleanup();
   });
 
   test('skipped when postImplementCommand is empty', async () => {
     const { db, cleanup } = makeTempDb();
-    const job = makeJob({ issue_number: 301 });
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath, { issue_number: 301 });
     enqueueJob(db, job);
     const octokit = makeOctokit();
-    const config = { ...makeConfig(), postImplementCommand: '' };
+    const config = makeConfig('ghp_test', { postImplementCommand: '' });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
 
-    const mockSpawn = () => {
-      let dataHandler = null;
-      let exitHandler = null;
-      return {
-        onData: (cb) => { dataHandler = cb; },
-        onExit: (cb) => {
-          exitHandler = cb;
-          setImmediate(() => {
-            if (dataHandler) dataHandler('pr created successfully\n');
-            if (exitHandler) exitHandler(0);
-          });
-        },
-        write: () => {},
-        kill: () => {},
-      };
-    };
+    await executeJob(db, job, octokit, config, { spawnFn });
 
-    const commentCountBefore = 0;
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
-
-    // No hook comment when command is empty
     assert.ok(!octokit.comments.some(c =>
       c.body.toLowerCase().includes('post-implement hook') ||
       (c.body.includes('✅') && c.body.toLowerCase().includes('hook'))
     ));
-    cleanup();
+    cleanup(); repoCleanup();
   });
 
   test('job remains completed even if hook fails', async () => {
     const { db, cleanup } = makeTempDb();
-    const job = makeJob({ issue_number: 302 });
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath, { issue_number: 302 });
     enqueueJob(db, job);
     const octokit = makeOctokit();
-    // A command that will exit non-zero
-    const config = { ...makeConfig(), postImplementCommand: 'exit 42' };
+    const config = makeConfig('ghp_test', { postImplementCommand: 'exit 42' });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
 
-    const mockSpawn = () => {
-      let dataHandler = null;
-      let exitHandler = null;
-      return {
-        onData: (cb) => { dataHandler = cb; },
-        onExit: (cb) => {
-          exitHandler = cb;
-          setImmediate(() => {
-            if (dataHandler) dataHandler('pr created successfully\n');
-            if (exitHandler) exitHandler(0);
-          });
-        },
-        write: () => {},
-        kill: () => {},
-      };
-    };
+    await executeJob(db, job, octokit, config, { spawnFn });
 
-    await executeJob(db, job, octokit, config, { spawnOverride: mockSpawn });
-
-    // Job should still be completed
     const updated = getJob(db, job.id);
     assert.equal(updated.status, 'completed');
-    // Should have a ⚠️ warning comment
     assert.ok(octokit.comments.some(c => c.body.includes('⚠️')));
-    cleanup();
+    cleanup(); repoCleanup();
+  });
+});
+
+// ---------- T004: startup command tests (must FAIL before T005/T006 implementation) ----------
+
+describe('executeJob — startup command (US1)', () => {
+  test('runs startupCommand when repoConfig.startupCommand is set', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo startup-ran' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    // Startup command ran — should see a comment about it
+    assert.ok(octokit.comments.some(c =>
+      c.body.toLowerCase().includes('startup') && c.body.includes('✅')
+    ), 'Expected startup success comment');
+    cleanup(); repoCleanup();
+  });
+
+  test('skips startupCommand when absent (backward compat)', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath }], // no startupCommand
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    assert.ok(!octokit.comments.some(c => c.body.toLowerCase().includes('startup')),
+      'Unexpected startup comment when startupCommand not set');
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed');
+    cleanup(); repoCleanup();
+  });
+
+  test('skips startupCommand when set to empty string', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: '' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    assert.ok(!octokit.comments.some(c => c.body.toLowerCase().includes('startup')),
+      'Unexpected startup comment when startupCommand is empty string');
+    cleanup(); repoCleanup();
+  });
+
+  test('runs startupCommand in job.repo_path as cwd', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    // Write a sentinel file — startup command echoes it only if cwd is correct
+    const sentinelFile = path.join(repoPath, 'cwd-check.txt');
+    fs.writeFileSync(sentinelFile, 'ok');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'cat cwd-check.txt' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    // If cwd was correct, `cat cwd-check.txt` exits 0 → startup success comment
+    assert.ok(octokit.comments.some(c => c.body.includes('✅') && c.body.toLowerCase().includes('startup')));
+    cleanup(); repoCleanup();
+  });
+
+  test('startup command runs after global postImplementCommand', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const order = [];
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = {
+      comments: [],
+      issues: {
+        createComment: async ({ body }) => {
+          octokit.comments.push({ body });
+          if (body.toLowerCase().includes('post-implement hook')) order.push('postImplementCommand');
+          if (body.toLowerCase().includes('startup')) order.push('startup');
+          return { data: { id: octokit.comments.length } };
+        },
+        listComments: async () => ({ data: [] }),
+      },
+    };
+    const config = makeConfig('ghp_test', {
+      postImplementCommand: 'echo global-hook',
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo startup' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    assert.ok(order.includes('postImplementCommand'), 'postImplementCommand should fire');
+    assert.ok(order.includes('startup'), 'startupCommand should fire');
+    assert.ok(order.indexOf('postImplementCommand') < order.indexOf('startup'),
+      'postImplementCommand should fire before startupCommand');
+    cleanup(); repoCleanup();
+  });
+});
+
+// ---------- T008: startup command reporting tests (must FAIL before T009) ----------
+
+describe('executeJob — startup command reporting (US2)', () => {
+  test('posts success comment with elapsed time on exit 0', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo hello' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const startupComment = octokit.comments.find(c =>
+      c.body.includes('✅') && c.body.toLowerCase().includes('startup')
+    );
+    assert.ok(startupComment, 'Expected ✅ startup comment');
+    assert.ok(startupComment.body.includes('s)') || startupComment.body.match(/\d+s/),
+      'Comment should include elapsed time');
+    cleanup(); repoCleanup();
+  });
+
+  test('posts failure comment on non-zero exit — job stays completed', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'exit 1' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    assert.ok(octokit.comments.some(c =>
+      c.body.includes('⚠️') && c.body.toLowerCase().includes('startup')
+    ), 'Expected ⚠️ startup failure comment');
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed', 'Job should remain completed even when startup fails');
+    cleanup(); repoCleanup();
+  });
+
+  test('failure comment does not call markFailed', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
+
+    const job = makeJob(repoPath);
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig('ghp_test', {
+      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'exit 99' }],
+    });
+    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'completed');
+    assert.equal(updated.error, null);
+    cleanup(); repoCleanup();
   });
 });

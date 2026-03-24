@@ -73,7 +73,8 @@ PR created by Claude → linked in issue
 | `githubOwner` | required | Only issues from this account are processed |
 | `pollIntervalSeconds` | 30 | Seconds between GitHub polls |
 | `postImplementCommand` | "" | Shell command run after successful implement |
-| `repos` | required | Array of `{ repo, localPath }` |
+| `repos` | required | Array of `{ repo, localPath, startupCommand? }` |
+| `repos[].startupCommand` | "" | Optional shell command run after implement stage (5-min timeout) |
 
 Config is re-read at the start of every poll cycle — no daemon restart needed for changes.
 
@@ -164,3 +165,12 @@ npm run lint              # ESLint
 Examples: `[COCKPIT] add user auth`, `[COCKPIT] fix onboarding crash`
 
 Only issues from `githubOwner` are processed.
+
+## Active Technologies
+- Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, @clack/prompts, chalk, node-pty (003-repo-startup-command)
+- SQLite via better-sqlite3 (WAL mode, `~/.cockpit/cockpit.db`) — no schema migration needed (config is JSON) (003-repo-startup-command)
+- Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, node:child_process (execFile) (003-repo-startup-command)
+- Config JSON (`~/.cockpit/config.json`) — no DB changes needed (003-repo-startup-command)
+
+## Recent Changes
+- 003-repo-startup-command: Added Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, @clack/prompts, chalk, node-pty
