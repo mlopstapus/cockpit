@@ -8,7 +8,7 @@ description: "Task list template for feature implementation"
 **Input**: Design documents from `/specs/[###-feature-name]/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Per the project constitution (Principle IV: Test-Driven Implementation), tests are MANDATORY — every feature MUST include tests written before or alongside implementation. Tests MUST pass before the agent creates a PR.
+**Tests**: The examples below include test tasks. Per the project constitution (Principle IV: Test-Driven Implementation), tests are MANDATORY — every feature MUST include tests written before or alongside implementation. Tests MUST pass before the agent creates a PR. See constitution for all six principles.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
