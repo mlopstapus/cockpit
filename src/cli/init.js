@@ -294,11 +294,28 @@ async function collectConfigInteractive({ configDir, logger }) {
     const localPath = await text({ message: `Local clone path for ${repoName}:`, validate: v => v.trim() ? undefined : 'Required' });
     if (isCancel(localPath)) { outro('Cancelled.'); return null; }
 
-    if (!fs.existsSync(localPath.trim())) {
-      logger.warn(`Warning: path '${localPath.trim()}' does not exist on disk. You can continue and fix this later.`);
+    const resolvedPath = localPath.trim();
+    if (!fs.existsSync(resolvedPath)) {
+      const shouldClone = await confirm({
+        message: `Path '${resolvedPath}' does not exist. Clone ${repoName.trim()} there now?`,
+        initialValue: true,
+      });
+      if (isCancel(shouldClone)) { outro('Cancelled.'); return null; }
+      if (shouldClone) {
+        try {
+          const parentDir = path.dirname(resolvedPath);
+          fs.mkdirSync(parentDir, { recursive: true });
+          execSync(`git clone https://github.com/${repoName.trim()} ${resolvedPath}`, { stdio: 'inherit' });
+          logger.log(`Cloned ${repoName.trim()} to ${resolvedPath}`);
+        } catch (err) {
+          logger.warn(`Clone failed: ${err.message}. You can fix this later.`);
+        }
+      } else {
+        logger.warn(`Warning: path '${resolvedPath}' does not exist. You can fix this later.`);
+      }
     }
 
-    repos.push({ repo: repoName.trim(), localPath: localPath.trim() });
+    repos.push({ repo: repoName.trim(), localPath: resolvedPath });
 
     const more = await confirm({ message: 'Add another repo?', initialValue: false });
     if (isCancel(more) || !more) addMore = false;
