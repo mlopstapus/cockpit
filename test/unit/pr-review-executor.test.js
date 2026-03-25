@@ -389,6 +389,78 @@ describe('executePrReview — multi-comment success (US2)', () => {
   });
 });
 
+// success comment failure → reset to queued, not marked complete
+describe('executePrReview — success comment post failure resets to queued', () => {
+  test('if postPRComment for success comment throws, job is reset to queued not completed', async () => {
+    const { db, cleanup } = makeTempDb();
+    const review = makeReview(db);
+    let callCount = 0;
+
+    const failingOctokit = {
+      issues: {
+        createComment: async ({ body }) => {
+          callCount++;
+          // First call is the acknowledgement — let it succeed
+          if (callCount === 1) return { data: { id: 1 } };
+          // Second call is the success/response comment — fail it
+          throw new Error('GitHub API error');
+        },
+      },
+    };
+
+    await executePrReview(db, review, failingOctokit, makeConfig(), {
+      spawnFn: makeSpawnFn(0),
+      execFileFn: makeExecFileFn(0),
+    });
+
+    const job = db.prepare("SELECT * FROM pr_review_jobs WHERE id = ?").get(review.id);
+    assert.equal(job.status, 'queued', 'job should be reset to queued when success comment fails');
+
+    cleanup();
+  });
+});
+
+// runNextPrReview — unexpected exception resets job to queued
+describe('runNextPrReview — unexpected exception resets job to queued', () => {
+  test('if executePrReview throws unexpectedly, job is reset to queued not left active', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { runNextPrReview } = await import('../../src/daemon/job-runner.js');
+
+    const review = makeReview(db);
+    // review is now active (dequeuePrReview was called inside makeReview)
+    // We need a fresh queued job to test runNextPrReview
+    const { enqueuePrReview } = await import('../../src/db/pr-reviews.js');
+    const { makeJobId } = await import('../../src/db/jobs.js');
+    const freshReview = {
+      id: makeJobId(),
+      github_repo: 'owner/repo',
+      pr_number: 42,
+      issue_number: 1,
+      repo_path: '/repos/test',
+      comment_id: '999',
+      comment_body: 'Fix this',
+      pr_url: 'https://github.com/owner/repo/pull/42',
+      status: 'queued',
+      created_at: new Date().toISOString(),
+    };
+    enqueuePrReview(db, freshReview);
+
+    // Octokit that throws on createComment to simulate unexpected crash
+    const crashOctokit = {
+      issues: {
+        createComment: async () => { throw new Error('unexpected crash'); },
+      },
+    };
+
+    await runNextPrReview(db, crashOctokit, makeConfig());
+
+    const job = db.prepare("SELECT * FROM pr_review_jobs WHERE id = ?").get(freshReview.id);
+    assert.equal(job.status, 'queued', 'job should be reset to queued after unexpected exception');
+
+    cleanup();
+  });
+});
+
 // T005 — updated executePrReview successful flow integration test
 describe('executePrReview — enriched success comment (US1)', () => {
   test('success comment contains What was addressed and What was changed sections', async () => {

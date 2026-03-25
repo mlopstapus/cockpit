@@ -96,13 +96,15 @@ function gitPush(repoPath, execFileFn) {
       '/bin/sh',
       ['-c', 'git add -A && git commit -m "Apply PR review feedback" && git push'],
       { timeout: 60000, cwd: repoPath },
-      (err, result) => {
+      (err, stdout, stderr) => {
         if (!err) return resolve({ pushed: true });
-        const msg = (err.stderr || err.message || '').toLowerCase();
+        const msg = (stderr || stdout || err.message || '').toLowerCase();
         if (msg.includes('nothing to commit') || msg.includes('nothing added to commit')) {
           return resolve({ pushed: false });
         }
-        reject(err);
+        const detail = stderr || stdout || err.message;
+        const gitErr = new Error(detail);
+        reject(gitErr);
       }
     );
   });
@@ -188,12 +190,13 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
   const successComment = pushed
     ? buildSuccessComment(review.comment_body, changesSection)
     : `💬 **Response**\n\n${changesSection || claudeOutput.trim()}`;
-  await postPRComment(
-    octokit,
-    review.github_repo,
-    review.pr_number,
-    successComment
-  ).catch((err) => log(`[cockpit] Failed to post success comment: ${err.message}`));
+  try {
+    await postPRComment(octokit, review.github_repo, review.pr_number, successComment);
+  } catch (err) {
+    log(`[cockpit] Failed to post success comment: ${err.message} — resetting to queued for retry`);
+    resetPrReviewToQueued(db, review.id);
+    return;
+  }
 
   markPrReviewComplete(db, review.id);
   log(`[cockpit] PR review job ${review.id}: completed`);

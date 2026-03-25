@@ -1,0 +1,3 @@
+If the daemon is killed between gitPush completing and postPRComment being called, changes land on the PR branch but the success comment is never posted. On restart the job re-runs Claude, which finds nothing to commit and posts a 💬 Response instead of a ✅ Changes pushed confirmation.
+
+Fix: add a `pending_comment` column to `pr_review_jobs`. Before calling postPRComment, persist the comment body to the DB. On startup recovery, if `status='active'` AND `pending_comment IS NOT NULL`, skip Claude and just post the stored comment, then mark complete. This makes the comment post idempotent across daemon restarts.
