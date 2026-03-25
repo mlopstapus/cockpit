@@ -402,26 +402,44 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
     }
   }
 
-  // Per-repo startup command — runs after global postImplementCommand, never marks job failed
+  // Per-repo startup command — runs after global postImplementCommand, never marks job failed.
+  // Split on '&&' so each segment runs independently; a daemon-restart segment is run detached
+  // (fire-and-forget) so the daemon process can survive long enough to post the comment first.
   const repoConfig = (config.repos || []).find(r => r.repo === job.github_repo);
   if (repoConfig?.startupCommand) {
-    const startMs = Date.now();
-    try {
-      const { stdout } = await execFileAsync('/bin/sh', ['-c', repoConfig.startupCommand], {
-        timeout: 5 * 60 * 1000, cwd: job.repo_path,
-      });
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      await postIssueComment(
-        octokit, job.github_repo, job.issue_number,
-        `✅ **Startup command completed** (${elapsed}s):\n\`\`\`\n${(stdout || '').trim()}\n\`\`\``
-      ).catch(() => {});
-    } catch (err) {
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      const stderr = (err.stderr || err.message || '').trim();
-      await postIssueComment(
-        octokit, job.github_repo, job.issue_number,
-        `⚠️ **Startup command failed** (exit ${err.code || 'unknown'}, ${elapsed}s):\n\`\`\`\n${stderr}\n\`\`\``
-      ).catch(() => {});
+    const segments = repoConfig.startupCommand.split('&&').map(s => s.trim()).filter(Boolean);
+    const restartIdx = segments.findIndex(s => /cockpit\s+restart|launchctl/.test(s));
+    const preRestart = restartIdx === -1 ? segments : segments.slice(0, restartIdx);
+    const restartCmd = restartIdx !== -1 ? segments[restartIdx] : null;
+
+    // Run non-restart segments synchronously so we can report results
+    if (preRestart.length > 0) {
+      const startMs = Date.now();
+      try {
+        const { stdout } = await execFileAsync('/bin/sh', ['-c', preRestart.join(' && ')], {
+          timeout: 5 * 60 * 1000, cwd: job.repo_path,
+        });
+        const elapsed = Math.round((Date.now() - startMs) / 1000);
+        await postIssueComment(
+          octokit, job.github_repo, job.issue_number,
+          `✅ **Startup command completed** (${elapsed}s):\n\`\`\`\n${(stdout || '').trim()}\n\`\`\``
+        ).catch(() => {});
+      } catch (err) {
+        const elapsed = Math.round((Date.now() - startMs) / 1000);
+        const stderr = (err.stderr || err.message || '').trim();
+        await postIssueComment(
+          octokit, job.github_repo, job.issue_number,
+          `⚠️ **Startup command failed** (exit ${err.code || 'unknown'}, ${elapsed}s):\n\`\`\`\n${stderr}\n\`\`\``
+        ).catch(() => {});
+        return; // don't restart if pre-restart steps failed
+      }
+    }
+
+    // Restart segment: fire detached so the daemon can exit cleanly on its own terms
+    if (restartCmd) {
+      spawn('/bin/sh', ['-c', `sleep 2 && ${restartCmd}`], {
+        detached: true, stdio: 'ignore', cwd: job.repo_path,
+      }).unref();
     }
   }
 }
