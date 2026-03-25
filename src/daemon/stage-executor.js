@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -282,7 +282,10 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
     let stageOutput = '';
 
     try {
-      stageOutput = await runClaudeStage(claudeBin, job.repo_path, stage.message(job), (line) => {
+      const deploySuffix = stage.name === 'implement'
+        ? '\n\nOnce you are done, make sure to recompile and redeploy the application so that all new changes are picked up.'
+        : '';
+      stageOutput = await runClaudeStage(claudeBin, job.repo_path, stage.message(job) + deploySuffix, (line) => {
         log(line);
         const url = extractPrUrl(line);
         if (url && !prUrl) {
@@ -402,44 +405,4 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
     }
   }
 
-  // Per-repo startup command — runs after global postImplementCommand, never marks job failed.
-  // Split on '&&' so each segment runs independently; a daemon-restart segment is run detached
-  // (fire-and-forget) so the daemon process can survive long enough to post the comment first.
-  const repoConfig = (config.repos || []).find(r => r.repo === job.github_repo);
-  if (repoConfig?.startupCommand) {
-    const segments = repoConfig.startupCommand.split('&&').map(s => s.trim()).filter(Boolean);
-    const restartIdx = segments.findIndex(s => /cockpit\s+restart|launchctl/.test(s));
-    const preRestart = restartIdx === -1 ? segments : segments.slice(0, restartIdx);
-    const restartCmd = restartIdx !== -1 ? segments[restartIdx] : null;
-
-    // Run non-restart segments synchronously so we can report results
-    if (preRestart.length > 0) {
-      const startMs = Date.now();
-      try {
-        const { stdout } = await execFileAsync('/bin/sh', ['-c', preRestart.join(' && ')], {
-          timeout: 5 * 60 * 1000, cwd: job.repo_path,
-        });
-        const elapsed = Math.round((Date.now() - startMs) / 1000);
-        await postIssueComment(
-          octokit, job.github_repo, job.issue_number,
-          `✅ **Startup command completed** (${elapsed}s):\n\`\`\`\n${(stdout || '').trim()}\n\`\`\``
-        ).catch(() => {});
-      } catch (err) {
-        const elapsed = Math.round((Date.now() - startMs) / 1000);
-        const stderr = (err.stderr || err.message || '').trim();
-        await postIssueComment(
-          octokit, job.github_repo, job.issue_number,
-          `⚠️ **Startup command failed** (exit ${err.code || 'unknown'}, ${elapsed}s):\n\`\`\`\n${stderr}\n\`\`\``
-        ).catch(() => {});
-        return; // don't restart if pre-restart steps failed
-      }
-    }
-
-    // Restart segment: fire detached so the daemon can exit cleanly on its own terms
-    if (restartCmd) {
-      spawn('/bin/sh', ['-c', `sleep 2 && ${restartCmd}`], {
-        detached: true, stdio: 'ignore', cwd: job.repo_path,
-      }).unref();
-    }
-  }
 }

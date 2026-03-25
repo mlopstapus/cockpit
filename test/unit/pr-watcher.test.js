@@ -47,10 +47,11 @@ function makeActivePr(db, overrides = {}) {
   return pr;
 }
 
-function makeOctokit({ prState = 'open', comments = [] } = {}) {
+function makeOctokit({ prState = 'open', comments = [], reviewComments = [] } = {}) {
   return {
     pulls: {
       get: async () => ({ data: { state: prState, merged: prState === 'merged' } }),
+      listReviewComments: async () => ({ data: reviewComments }),
     },
     issues: {
       listComments: async () => ({ data: comments }),
@@ -223,6 +224,42 @@ describe('pollActivePr — multiple comments batched into one job', () => {
     assert.ok(jobs[0].comment_body.includes('Fix error handling'));
     assert.ok(jobs[0].comment_body.includes('Add logging'));
     assert.ok(jobs[0].comment_body.includes('Update README'));
+
+    cleanup();
+  });
+});
+
+describe('pollActivePr — inline review comments', () => {
+  test('inline review comment (pulls.listReviewComments) is picked up and enqueued', async () => {
+    const { db, cleanup } = makeTempDb();
+    const pr = makeActivePr(db);
+    const reviewComment = makeComment({ id: 701, body: 'This line needs a null check', user: { login: githubOwner } });
+    // No issue-level comments; only an inline review comment
+    const octokit = makeOctokit({ comments: [], reviewComments: [reviewComment] });
+
+    await pollActivePr(octokit, db, pr, githubOwner);
+
+    const jobs = db.prepare("SELECT * FROM pr_review_jobs").all();
+    assert.equal(jobs.length, 1, 'inline review comment should create a review job');
+    assert.ok(jobs[0].comment_body.includes('null check'));
+    assert.ok(isPrCommentSeen(db, pr.github_repo, pr.pr_number, '701'));
+
+    cleanup();
+  });
+
+  test('mix of issue comments and inline review comments are batched into one job', async () => {
+    const { db, cleanup } = makeTempDb();
+    const pr = makeActivePr(db);
+    const issueComment = makeComment({ id: 801, body: 'Update docs', user: { login: githubOwner } });
+    const reviewComment = makeComment({ id: 802, body: 'Add a test here', user: { login: githubOwner } });
+    const octokit = makeOctokit({ comments: [issueComment], reviewComments: [reviewComment] });
+
+    await pollActivePr(octokit, db, pr, githubOwner);
+
+    const jobs = db.prepare("SELECT * FROM pr_review_jobs").all();
+    assert.equal(jobs.length, 1, 'both comment types should batch into one job');
+    assert.ok(jobs[0].comment_body.includes('Update docs'));
+    assert.ok(jobs[0].comment_body.includes('Add a test here'));
 
     cleanup();
   });
