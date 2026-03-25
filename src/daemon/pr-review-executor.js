@@ -149,7 +149,7 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
   // Step 2: Run Claude
   let claudeOutput = '';
   try {
-    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}\n\nOnce you are done, make sure to recompile and redeploy the application so that all new changes are picked up.\n\nAt the end of your response, include a section headed exactly:\n\n## Changes Made\n\nList one bullet for each review comment you addressed, describing concisely what you changed. Do not include file names or line numbers — focus on what was wrong and what you fixed.`;
+    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}\n\nAt the end of your response, include a section headed exactly:\n\n## Changes Made\n\nList one bullet for each review comment you addressed, describing concisely what you changed. Do not include file names or line numbers — focus on what was wrong and what you fixed.`;
     log(`[cockpit] PR review job ${review.id}: running Claude`);
     claudeOutput = await runClaude(claudeBin, review.repo_path, prompt, (line) => log(line), spawnFn);
   } catch (err) {
