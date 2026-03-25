@@ -87,6 +87,8 @@ function runClaude(claudeBin, repoPath, prompt, onLine, spawnFn) {
 }
 
 // Commit and push all changes in repoPath.
+// Returns { pushed: true } if changes were committed and pushed,
+// or { pushed: false } if there was nothing to commit (Claude only explained, no edits).
 function gitPush(repoPath, execFileFn) {
   const execImpl = execFileFn || ((bin, args, opts, cb) => execFile(bin, args, opts, cb));
   return new Promise((resolve, reject) => {
@@ -95,8 +97,12 @@ function gitPush(repoPath, execFileFn) {
       ['-c', 'git add -A && git commit -m "Apply PR review feedback" && git push'],
       { timeout: 60000, cwd: repoPath },
       (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+        if (!err) return resolve({ pushed: true });
+        const msg = (err.stderr || err.message || '').toLowerCase();
+        if (msg.includes('nothing to commit') || msg.includes('nothing added to commit')) {
+          return resolve({ pushed: false });
+        }
+        reject(err);
       }
     );
   });
@@ -160,10 +166,12 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
 
   const changesSection = extractChangesSection(claudeOutput);
 
-  // Step 3: Commit + push
+  // Step 3: Commit + push (skip gracefully if Claude made no file changes)
+  let pushed = false;
   try {
     log(`[cockpit] PR review job ${review.id}: pushing changes`);
-    await gitPush(review.repo_path, execFileFn);
+    ({ pushed } = await gitPush(review.repo_path, execFileFn));
+    if (!pushed) log(`[cockpit] No file changes — skipping commit`);
   } catch (err) {
     log(`[cockpit] git push failed: ${err.message}`);
     await postPRComment(
@@ -176,12 +184,15 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
     return;
   }
 
-  // Step 4: Success
+  // Step 4: Post response (always — whether changes were pushed or it was explanation-only)
+  const successComment = pushed
+    ? buildSuccessComment(review.comment_body, changesSection)
+    : `💬 **Response**\n\n${changesSection || claudeOutput.trim()}`;
   await postPRComment(
     octokit,
     review.github_repo,
     review.pr_number,
-    buildSuccessComment(review.comment_body, changesSection)
+    successComment
   ).catch((err) => log(`[cockpit] Failed to post success comment: ${err.message}`));
 
   markPrReviewComplete(db, review.id);
