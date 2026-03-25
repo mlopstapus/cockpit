@@ -156,12 +156,21 @@ function installSpecifyCli({ which = defaultWhich, logger = console } = {}) {
 
 // ─── Constitution writer ──────────────────────────────────────────────────────
 
-export function writeConstitution(localPath, { projectName, principles }) {
+export function writeConstitution(localPath, { projectName, principles }, { logger = console } = {}) {
+  const constitutionPath = path.join(localPath, '.specify', 'memory', 'constitution.md');
+
+  if (fs.existsSync(constitutionPath)) {
+    logger.log(`Constitution already exists at ${constitutionPath}.`);
+    logger.log('To update it, open an issue: [COCKPIT] update constitution, or run /speckit.constitution in the repo.');
+    return false;
+  }
+
   const dir = path.join(localPath, '.specify', 'memory');
   fs.mkdirSync(dir, { recursive: true });
   const date = new Date().toISOString().split('T')[0];
   const content = `# ${projectName} Constitution\n\n## Core Principles\n\n${principles}\n\n**Version**: 1.0.0 | **Ratified**: ${date}\n`;
-  fs.writeFileSync(path.join(dir, 'constitution.md'), content, 'utf8');
+  fs.writeFileSync(constitutionPath, content, 'utf8');
+  return true;
 }
 
 // ─── Next-steps printer ──────────────────────────────────────────────────────
@@ -240,8 +249,8 @@ export async function runInit(options = {}) {
   // Step 8: Write constitutions
   for (const { localPath, projectName, principles } of constitutions) {
     try {
-      writeConstitution(localPath, { projectName, principles });
-      logger.log(`Constitution written to ${localPath}/.specify/memory/constitution.md`);
+      const wrote = writeConstitution(localPath, { projectName, principles }, { logger });
+      if (wrote) logger.log(`Constitution written to ${localPath}/.specify/memory/constitution.md`);
     } catch (err) {
       logger.warn(`Could not write constitution for ${localPath}: ${err.message}`);
     }
@@ -291,27 +300,36 @@ async function collectConfigInteractive({ configDir, logger }) {
     const repoName = await text({ message: 'Repo to watch (owner/name format):', validate: v => /^[\w.-]+\/[\w.-]+$/.test(v.trim()) ? undefined : 'Use owner/name format' });
     if (isCancel(repoName)) { outro('Cancelled.'); return null; }
 
-    const localPath = await text({ message: `Local clone path for ${repoName}:`, validate: v => v.trim() ? undefined : 'Required' });
-    if (isCancel(localPath)) { outro('Cancelled.'); return null; }
+    const alreadyCloned = await confirm({
+      message: `Have you already cloned ${repoName.trim()} locally?`,
+      initialValue: true,
+    });
+    if (isCancel(alreadyCloned)) { outro('Cancelled.'); return null; }
 
-    const resolvedPath = localPath.trim();
-    if (!fs.existsSync(resolvedPath)) {
-      const shouldClone = await confirm({
-        message: `Path '${resolvedPath}' does not exist. Clone ${repoName.trim()} there now?`,
-        initialValue: true,
-      });
-      if (isCancel(shouldClone)) { outro('Cancelled.'); return null; }
-      if (shouldClone) {
-        try {
-          const parentDir = path.dirname(resolvedPath);
-          fs.mkdirSync(parentDir, { recursive: true });
-          execSync(`git clone https://github.com/${repoName.trim()} ${resolvedPath}`, { stdio: 'inherit' });
-          logger.log(`Cloned ${repoName.trim()} to ${resolvedPath}`);
-        } catch (err) {
-          logger.warn(`Clone failed: ${err.message}. You can fix this later.`);
-        }
-      } else {
+    let resolvedPath;
+    if (alreadyCloned) {
+      const localPath = await text({ message: `Local path to your clone of ${repoName.trim()}:`, validate: v => v.trim() ? undefined : 'Required' });
+      if (isCancel(localPath)) { outro('Cancelled.'); return null; }
+      resolvedPath = localPath.trim();
+      if (!fs.existsSync(resolvedPath)) {
         logger.warn(`Warning: path '${resolvedPath}' does not exist. You can fix this later.`);
+      }
+    } else {
+      const defaultPath = path.join(os.homedir(), 'repos', repoName.trim().split('/')[1]);
+      const clonePath = await text({
+        message: `Where should it be cloned? (local destination path)`,
+        initialValue: defaultPath,
+        validate: v => v.trim() ? undefined : 'Required',
+      });
+      if (isCancel(clonePath)) { outro('Cancelled.'); return null; }
+      resolvedPath = clonePath.trim();
+      try {
+        const parentDir = path.dirname(resolvedPath);
+        fs.mkdirSync(parentDir, { recursive: true });
+        execSync(`git clone https://github.com/${repoName.trim()} ${resolvedPath}`, { stdio: 'inherit' });
+        logger.log(`Cloned ${repoName.trim()} to ${resolvedPath}`);
+      } catch (err) {
+        logger.warn(`Clone failed: ${err.message}. You can fix this later.`);
       }
     }
 

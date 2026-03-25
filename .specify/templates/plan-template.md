@@ -38,7 +38,7 @@
 | III. Security First | Have all external inputs been identified and sanitised? Are secrets stored in GitHub or injected via env vars (not in source)? Is VPN/private network access enforced? | [ ] |
 | IV. Test-Driven Implementation | Are tests planned alongside (or before) implementation for all critical paths? | [ ] |
 | V. Dev Box Execution Model | Does this feature assume host-OS execution (no containerised agents)? Are post-implement hooks expressed as configurable shell commands? | [ ] |
-| VI. Continuous Self-Improvement | Are memory updates, template improvements, and backlog entries planned for session close? | [ ] |
+| VI. Always Self-Reflect | Has the agent paused to verify assumptions, check side-effects, and confirm output matches the spec? Are memory updates, template improvements, and backlog entries planned for session close? | [ ] |
 
 ## Project Structure
 

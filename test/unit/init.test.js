@@ -138,7 +138,7 @@ describe('getServicePath', () => {
 });
 
 describe('writeConstitution', () => {
-  test('creates .specify/memory/constitution.md with project name and principles', () => {
+  test('creates .specify/memory/constitution.md when none exists', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
     try {
       writeConstitution(dir, { projectName: 'MyApp', principles: 'Test-first. No hacks.' });
@@ -158,6 +158,27 @@ describe('writeConstitution', () => {
     try {
       writeConstitution(dir, { projectName: 'X', principles: 'Keep it simple.' });
       assert.ok(fs.existsSync(path.join(dir, '.specify', 'memory', 'constitution.md')));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('skips write and logs a message when constitution already exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
+    try {
+      const constitutionPath = path.join(dir, '.specify', 'memory', 'constitution.md');
+      fs.mkdirSync(path.dirname(constitutionPath), { recursive: true });
+      fs.writeFileSync(constitutionPath, '# Original\n');
+
+      const logs = [];
+      const logger = { log: msg => logs.push(msg), warn: msg => logs.push(msg) };
+      writeConstitution(dir, { projectName: 'X', principles: 'New.' }, { logger });
+
+      // File should not have been overwritten
+      assert.ok(fs.readFileSync(constitutionPath, 'utf8').includes('# Original'));
+      // User should be told how to update it
+      assert.ok(logs.some(l => l.includes('already exists')));
+      assert.ok(logs.some(l => l.includes('/speckit.constitution')));
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
