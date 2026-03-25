@@ -109,6 +109,29 @@ export function getJob(db, id) {
   return db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) ?? null;
 }
 
+export function retryJob(db, id) {
+  const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+  if (!row) return { success: false, reason: 'not_found' };
+  if (row.status !== 'failed') return { success: false, reason: 'wrong_state', status: row.status };
+  const result = db.prepare(`
+    UPDATE jobs
+    SET status = 'queued',
+        error = NULL,
+        rate_limit_count = 0,
+        rate_limit_reset_at = NULL,
+        updated_at = ?
+    WHERE id = ? AND status = 'failed'
+  `).run(new Date().toISOString(), id);
+  if (result.changes === 0) return { success: false, reason: 'wrong_state', status: 'unknown' };
+  return { success: true, job: { ...row, status: 'queued', error: null, rate_limit_count: 0, rate_limit_reset_at: null } };
+}
+
+export function getLastFailedJob(db) {
+  return db.prepare(
+    "SELECT * FROM jobs WHERE status = 'failed' ORDER BY updated_at DESC LIMIT 1"
+  ).get() ?? null;
+}
+
 export function listActive(db) {
   return db.prepare("SELECT * FROM jobs WHERE status = 'active' ORDER BY updated_at DESC").all();
 }
