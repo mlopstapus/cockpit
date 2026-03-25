@@ -177,6 +177,7 @@ Only issues from `githubOwner` are processed.
 - SQLite via `better-sqlite3` (`~/.cockpit/cockpit.db`) — two new columns added via `ALTER TABLE ADD COLUMN` (005-claude-rate-limits)
 - Node.js 18+ ESM + `@clack/prompts` (existing), `node:child_process` (spawnSync — existing), `node:fs`, `node:path`, `node:os` (006-init-speckit-constitution)
 - `~/.cockpit/config.json` (existing schema, unchanged) + `<repo>/.specify/memory/constitution.md` (new file in target repo) (006-init-speckit-constitution)
+- Markdown (no build step) + None — static files only (007-public-readme-docs)
 
 ## Recent Changes
 - 005-claude-rate-limits: Detect Claude API rate limits from stdout/stderr, persist rate_limited status to SQLite with reset time, auto-requeue after reset, retry cap of 3, show in `cockpit status`
