@@ -33,16 +33,6 @@ cockpit start
 #    Cockpit picks it up within pollIntervalSeconds (default: 30s)
 ```
 
-Non-interactive setup (CI/scripts):
-
-```bash
-GITHUB_TOKEN=ghp_... \
-GITHUB_OWNER=myuser \
-GITHUB_REPOS=myuser/myrepo \
-REPO_LOCAL_PATHS='{"myuser/myrepo":"/home/user/repos/myrepo"}' \
-cockpit init --yes
-```
-
 Verify everything is running:
 
 ```bash
