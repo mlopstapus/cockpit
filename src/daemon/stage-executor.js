@@ -6,7 +6,10 @@ import { extractPrUrl } from '../process/claude-process.js';
 import { postIssueComment, listIssueComments, BOT_COMMENT_PREFIXES } from '../github/commenter.js';
 import { registerActivePr } from '../db/prs.js';
 import { appendLog } from '../db/logs.js';
-import { markFailed, markComplete, markStage } from '../db/jobs.js';
+import { markFailed, markComplete, markStage, markRateLimited } from '../db/jobs.js';
+import { detectRateLimit, formatResetMessage } from '../process/rate-limit-detector.js';
+
+const RATE_LIMIT_FALLBACK_MS = 60 * 60 * 1000; // 1 hour
 
 const execFileAsync = promisify(execFile);
 
@@ -190,7 +193,11 @@ function runClaudeStage(claudeBin, repoPath, message, onLine, { timeoutMs = 30 *
       clearTimeout(timer);
       if (buf) { onLine(buf); output += buf; }
       if (code === 0) resolve(output);
-      else reject(new Error(`claude exited with code ${code}`));
+      else {
+        const err = new Error(`claude exited with code ${code}`);
+        err.output = output;
+        reject(err);
+      }
     });
 
     proc.on('error', reject);
@@ -297,6 +304,30 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
       }, { continueSession: !isFirstStage, spawnFn });
     } catch (err) {
       log(`[cockpit] Stage ${stage.name} failed: ${err.message}`);
+
+      // Check if this is a Claude API rate limit
+      const { isRateLimit, resetAt } = detectRateLimit(err.output || '');
+      if (isRateLimit) {
+        const currentCount = (job.rate_limit_count || 0);
+        if (currentCount >= 3) {
+          // Terminal failure — exceeded retry cap
+          log(`[cockpit] Rate limit retry cap reached (${currentCount} retries) — failing job permanently`);
+          markFailed(db, job.id, `Rate limit retry cap reached after ${currentCount} attempts`);
+          await postIssueComment(
+            octokit, job.github_repo, job.issue_number,
+            `❌ **Rate limit retry cap reached** — pipeline failed permanently after ${currentCount} rate-limited attempts on stage *${STAGE_LABELS[stage.name] || stage.name}*.\n\nCheck \`cockpit logs ${job.id}\` for details.`
+          ).catch(() => {});
+          return;
+        }
+        const resumeAt = resetAt ?? new Date(Date.now() + RATE_LIMIT_FALLBACK_MS);
+        const newCount = currentCount + 1;
+        markRateLimited(db, job.id, resumeAt.toISOString(), newCount);
+        const commentBody = `⏳ **Rate limit hit on stage *${STAGE_LABELS[stage.name] || stage.name}*** (attempt ${newCount}/3)\n\n${formatResetMessage(resetAt)}`;
+        log(`[cockpit] Rate limited — resumeAt=${resumeAt.toISOString()} count=${newCount}`);
+        await postIssueComment(octokit, job.github_repo, job.issue_number, commentBody).catch(() => {});
+        return;
+      }
+
       let draftPrLine = '';
       if (stage.name === 'implement') {
         log(`[cockpit] Implement failed — pushing branch and opening draft PR with partial work…`);
@@ -371,26 +402,44 @@ export async function executeJob(db, job, octokit, config, opts = {}) {
     }
   }
 
-  // Per-repo startup command — runs after global postImplementCommand, never marks job failed
+  // Per-repo startup command — runs after global postImplementCommand, never marks job failed.
+  // Split on '&&' so each segment runs independently; a daemon-restart segment is run detached
+  // (fire-and-forget) so the daemon process can survive long enough to post the comment first.
   const repoConfig = (config.repos || []).find(r => r.repo === job.github_repo);
   if (repoConfig?.startupCommand) {
-    const startMs = Date.now();
-    try {
-      const { stdout } = await execFileAsync('/bin/sh', ['-c', repoConfig.startupCommand], {
-        timeout: 5 * 60 * 1000, cwd: job.repo_path,
-      });
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      await postIssueComment(
-        octokit, job.github_repo, job.issue_number,
-        `✅ **Startup command completed** (${elapsed}s):\n\`\`\`\n${(stdout || '').trim()}\n\`\`\``
-      ).catch(() => {});
-    } catch (err) {
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      const stderr = (err.stderr || err.message || '').trim();
-      await postIssueComment(
-        octokit, job.github_repo, job.issue_number,
-        `⚠️ **Startup command failed** (exit ${err.code || 'unknown'}, ${elapsed}s):\n\`\`\`\n${stderr}\n\`\`\``
-      ).catch(() => {});
+    const segments = repoConfig.startupCommand.split('&&').map(s => s.trim()).filter(Boolean);
+    const restartIdx = segments.findIndex(s => /cockpit\s+restart|launchctl/.test(s));
+    const preRestart = restartIdx === -1 ? segments : segments.slice(0, restartIdx);
+    const restartCmd = restartIdx !== -1 ? segments[restartIdx] : null;
+
+    // Run non-restart segments synchronously so we can report results
+    if (preRestart.length > 0) {
+      const startMs = Date.now();
+      try {
+        const { stdout } = await execFileAsync('/bin/sh', ['-c', preRestart.join(' && ')], {
+          timeout: 5 * 60 * 1000, cwd: job.repo_path,
+        });
+        const elapsed = Math.round((Date.now() - startMs) / 1000);
+        await postIssueComment(
+          octokit, job.github_repo, job.issue_number,
+          `✅ **Startup command completed** (${elapsed}s):\n\`\`\`\n${(stdout || '').trim()}\n\`\`\``
+        ).catch(() => {});
+      } catch (err) {
+        const elapsed = Math.round((Date.now() - startMs) / 1000);
+        const stderr = (err.stderr || err.message || '').trim();
+        await postIssueComment(
+          octokit, job.github_repo, job.issue_number,
+          `⚠️ **Startup command failed** (exit ${err.code || 'unknown'}, ${elapsed}s):\n\`\`\`\n${stderr}\n\`\`\``
+        ).catch(() => {});
+        return; // don't restart if pre-restart steps failed
+      }
+    }
+
+    // Restart segment: fire detached so the daemon can exit cleanly on its own terms
+    if (restartCmd) {
+      spawn('/bin/sh', ['-c', `sleep 2 && ${restartCmd}`], {
+        detached: true, stdio: 'ignore', cwd: job.repo_path,
+      }).unref();
     }
   }
 }

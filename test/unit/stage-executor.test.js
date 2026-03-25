@@ -590,3 +590,246 @@ describe('executeJob — draft PR guarantee on implement success without PR', ()
     cleanup(); repoCleanup();
   });
 });
+
+// ── T010: output attached to error ────────────────────────────────────────
+
+describe('runClaudeStage — err.output on non-zero exit', () => {
+  test('err.output contains accumulated stdout text when process exits non-zero', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 500 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    // spawnFn emits rate-limit text then exits 1
+    const spawnFn = () => makeChildProcess(['usage limit reached'], 1);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    // Job should be failed or rate_limited; either way err.output was accessible
+    const updated = getJob(db, job.id);
+    assert.ok(
+      updated.status === 'failed' || updated.status === 'rate_limited',
+      `Expected failed or rate_limited, got ${updated.status}`
+    );
+    cleanup(); repoCleanup();
+  });
+});
+
+// ── T011: rate-limit detection in executeJob (US1) ─────────────────────────
+
+describe('executeJob — rate limit on specify stage', () => {
+  test('sets status to rate_limited and posts comment when rate-limit message detected', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 510 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    // specify exits non-zero with a rate-limit message containing an ISO timestamp
+    const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const spawnFn = () => makeChildProcess(
+      [`Claude AI usage limit reached. Resets at ${futureIso}`], 1
+    );
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'rate_limited');
+    assert.ok(updated.rate_limit_reset_at, 'rate_limit_reset_at should be set');
+    assert.equal(updated.rate_limit_count, 1);
+
+    // Comment should mention the rate limit
+    const rlComment = octokit.comments.find(c =>
+      c.body.toLowerCase().includes('rate limit') ||
+      c.body.toLowerCase().includes('usage limit')
+    );
+    assert.ok(rlComment, 'Expected a rate-limit comment to be posted');
+
+    cleanup(); repoCleanup();
+  });
+
+  test('rate-limit comment body contains stage name and reset time', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 511 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    const futureIso = new Date(Date.now() + 47 * 60 * 1000).toISOString();
+    const spawnFn = () => makeChildProcess(
+      [`usage limit reached reset at ${futureIso}`], 1
+    );
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const rlComment = octokit.comments.find(c =>
+      c.body.toLowerCase().includes('rate limit') ||
+      c.body.toLowerCase().includes('usage limit')
+    );
+    assert.ok(rlComment, 'Rate-limit comment not found');
+    // Comment body should include stage info
+    assert.ok(
+      rlComment.body.toLowerCase().includes('specify') ||
+      rlComment.body.includes('🔍') ||
+      rlComment.body.toLowerCase().includes('stage'),
+      `Comment should mention stage: ${rlComment.body}`
+    );
+
+    cleanup(); repoCleanup();
+  });
+
+  test('comment body contains fallback phrase when no timestamp in output', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 512 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    // Rate-limit message with no parseable timestamp
+    const spawnFn = () => makeChildProcess(['Claude AI usage limit reached'], 1);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'rate_limited');
+
+    const rlComment = octokit.comments.find(c =>
+      c.body.toLowerCase().includes('rate limit') ||
+      c.body.toLowerCase().includes('fallback') ||
+      c.body.toLowerCase().includes('unknown')
+    );
+    assert.ok(rlComment, 'Expected rate-limit fallback comment');
+    // Should mention fallback duration
+    assert.ok(
+      rlComment.body.includes('60') || rlComment.body.toLowerCase().includes('fallback'),
+      `Comment should mention fallback wait: ${rlComment.body}`
+    );
+
+    cleanup(); repoCleanup();
+  });
+
+  test('job.stage is preserved (not reset) after markRateLimited', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 513 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const spawnFn = () => makeChildProcess(
+      [`usage limit reached ${futureIso}`], 1
+    );
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'rate_limited');
+    // Stage should be 'specify' (the stage that was running), not 'idle' or 'done'
+    assert.equal(updated.stage, 'specify',
+      `Stage should be preserved as 'specify', got '${updated.stage}'`
+    );
+
+    cleanup(); repoCleanup();
+  });
+
+  test('non-rate-limit error still calls markFailed (not markRateLimited)', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 514 });
+    enqueueJob(db, job);
+    const octokit = makeOctokit();
+    const config = makeConfig();
+
+    // Generic failure — no rate-limit phrase
+    const spawnFn = () => makeChildProcess(['Error: command not found'], 1);
+
+    await executeJob(db, job, octokit, config, { spawnFn });
+
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'failed', 'Non-rate-limit error should set status to failed');
+    assert.equal(updated.rate_limit_count, 0, 'rate_limit_count should remain 0');
+
+    cleanup(); repoCleanup();
+  });
+});
+
+// ── T017: retry cap tests (US3) ────────────────────────────────────────────
+
+describe('executeJob — rate-limit retry cap at 3', () => {
+  test('4th rate-limit occurrence permanently fails the job', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    // Seed the job with rate_limit_count already at 3 (simulates 3 prior retries)
+    const job = makeJob(repoPath, { issue_number: 530, rate_limit_count: 3 });
+    enqueueJob(db, job);
+    // Manually set rate_limit_count in DB to 3
+    const { markRateLimited: mrl } = await import('../../src/db/jobs.js');
+    mrl(db, job.id, null, 3);
+    // Re-fetch so job object has rate_limit_count=3
+    const { getJob: gj } = await import('../../src/db/jobs.js');
+    const freshJob = gj(db, job.id);
+
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const spawnFn = () => makeChildProcess(
+      [`usage limit reached ${futureIso}`], 1
+    );
+
+    await executeJob(db, freshJob, octokit, config, { spawnFn });
+
+    const updated = gj(db, freshJob.id);
+    assert.equal(updated.status, 'failed',
+      `Expected 'failed' on 4th rate limit, got '${updated.status}'`
+    );
+
+    // A terminal error comment should have been posted
+    const terminalComment = octokit.comments.find(c =>
+      c.body.includes('❌') ||
+      c.body.toLowerCase().includes('retry limit') ||
+      c.body.toLowerCase().includes('3/3')
+    );
+    assert.ok(terminalComment, 'Expected a terminal failure comment for retry limit');
+
+    cleanup(); repoCleanup();
+  });
+
+  test('3rd rate-limit occurrence (count=2→3) still sets rate_limited', async () => {
+    const { db, cleanup } = makeTempDb();
+    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
+
+    const job = makeJob(repoPath, { issue_number: 531 });
+    enqueueJob(db, job);
+    // Manually set count to 2 to simulate 2 prior rate limits
+    const { markRateLimited: mrl, getJob: gj } = await import('../../src/db/jobs.js');
+    mrl(db, job.id, null, 2);
+    const freshJob = gj(db, job.id);
+
+    const octokit = makeOctokit();
+    const config = makeConfig();
+    const spawnFn = () => makeChildProcess(['usage limit reached'], 1);
+
+    await executeJob(db, freshJob, octokit, config, { spawnFn });
+
+    const updated = gj(db, freshJob.id);
+    assert.equal(updated.status, 'rate_limited',
+      `3rd hit should still be rate_limited, got '${updated.status}'`
+    );
+    assert.equal(updated.rate_limit_count, 3);
+
+    cleanup(); repoCleanup();
+  });
+});

@@ -4,6 +4,7 @@ import { pollActivePr } from '../github/pr-watcher.js';
 import { createClient, RateLimitError } from '../github/client.js';
 import { runNextJob, runNextPrReview } from './job-runner.js';
 import { listActivePrs } from '../db/prs.js';
+import { requeueExpiredRateLimited } from '../db/jobs.js';
 import { expandHome } from '../config/index.js';
 
 const COCKPIT_DIR = expandHome('~/.cockpit');
@@ -26,6 +27,10 @@ export async function startPollLoop(db, opts = {}) {
     }
 
     const octokit = createClient(config.githubToken);
+
+    // Requeue any rate-limited jobs whose reset time has passed
+    const requeued = requeueExpiredRateLimited(db);
+    if (requeued > 0) console.log(`[cockpit] Requeued ${requeued} rate-limited job(s)`);
 
     // Poll each repo
     for (const repoEntry of config.repos) {

@@ -48,6 +48,36 @@ export function markStage(db, id, stage) {
   ).run(stage, new Date().toISOString(), id);
 }
 
+export function markRateLimited(db, id, resetAt, newCount) {
+  db.prepare(`
+    UPDATE jobs
+    SET status = 'rate_limited',
+        rate_limit_reset_at = ?,
+        rate_limit_count = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(resetAt ?? null, newCount, new Date().toISOString(), id);
+}
+
+export function requeueExpiredRateLimited(db) {
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    UPDATE jobs
+    SET status = 'queued',
+        rate_limit_reset_at = NULL,
+        updated_at = ?
+    WHERE status = 'rate_limited'
+      AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= ?)
+  `).run(now, now);
+  return result.changes;
+}
+
+export function listRateLimited(db) {
+  return db.prepare(
+    "SELECT * FROM jobs WHERE status = 'rate_limited' ORDER BY updated_at DESC"
+  ).all();
+}
+
 export function requeueInterrupted(db) {
   db.prepare(`
     UPDATE jobs

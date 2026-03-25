@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { expandHome } from '../config/index.js';
-import { listActive } from '../db/jobs.js';
+import { listActive, listRateLimited } from '../db/jobs.js';
 
 const COCKPIT_DIR = expandHome('~/.cockpit');
 const PID_FILE = path.join(COCKPIT_DIR, 'daemon.pid');
@@ -122,6 +122,17 @@ export function showStatus(db, config) {
       console.log(`Active job: ${j.id} (${j.spec_name}) — stage: ${j.stage} — elapsed: ${elapsed}s`);
     } else {
       console.log('Queue: idle');
+    }
+
+    const rateLimited = listRateLimited(db);
+    if (rateLimited.length > 0) {
+      console.log(`\nRate-limited jobs (${rateLimited.length}):`);
+      for (const j of rateLimited) {
+        const resetAt = j.rate_limit_reset_at
+          ? `resets at ${new Date(j.rate_limit_reset_at).toUTCString()}`
+          : 'reset time unknown';
+        console.log(`  ${j.id} (${j.spec_name}) — stage: ${j.stage} — ${resetAt} — attempt ${j.rate_limit_count}/3`);
+      }
     }
   }
 
