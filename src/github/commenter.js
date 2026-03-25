@@ -26,10 +26,21 @@ export async function postPRComment(octokit, repoFullName, prNumber, body) {
   return octokit.issues.createComment({ owner, repo, issue_number: prNumber, body });
 }
 
+// Returns all human-visible comments on a PR: both the conversation thread
+// (issues.listComments) and inline code review comments (pulls.listReviewComments).
+// Each returned object has { id, body, user, created_at } normalised from both sources.
 export async function listPRComments(octokit, repoFullName, prNumber, since) {
   const { owner, repo } = parseRepo(repoFullName);
-  const params = { owner, repo, issue_number: prNumber, per_page: 100 };
+  const params = { owner, repo, per_page: 100 };
   if (since) params.since = since;
-  const response = await octokit.issues.listComments(params);
-  return response.data;
+
+  const [issueRes, reviewRes] = await Promise.all([
+    octokit.issues.listComments({ ...params, issue_number: prNumber }),
+    octokit.pulls.listReviewComments({ ...params, pull_number: prNumber }),
+  ]);
+
+  return [
+    ...issueRes.data,
+    ...reviewRes.data,
+  ];
 }

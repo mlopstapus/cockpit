@@ -274,10 +274,10 @@ describe('executeJob — post-implement hook', () => {
   });
 });
 
-// ---------- T004: startup command tests (must FAIL before T005/T006 implementation) ----------
+// ---------- T004: deploy instruction injected into implement prompt ----------
 
-describe('executeJob — startup command (US1)', () => {
-  test('runs startupCommand when repoConfig.startupCommand is set', async () => {
+describe('executeJob — deploy instruction in implement prompt', () => {
+  test('redeploy instruction is always appended to the implement stage prompt', async () => {
     const { db, cleanup } = makeTempDb();
     const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
     writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
@@ -285,126 +285,25 @@ describe('executeJob — startup command (US1)', () => {
     const job = makeJob(repoPath);
     enqueueJob(db, job);
     const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo startup-ran' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+    const config = makeConfig();
 
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    // Startup command ran — should see a comment about it
-    assert.ok(octokit.comments.some(c =>
-      c.body.toLowerCase().includes('startup') && c.body.includes('✅')
-    ), 'Expected startup success comment');
-    cleanup(); repoCleanup();
-  });
-
-  test('skips startupCommand when absent (backward compat)', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath }], // no startupCommand
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
-
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    assert.ok(!octokit.comments.some(c => c.body.toLowerCase().includes('startup')),
-      'Unexpected startup comment when startupCommand not set');
-    const updated = getJob(db, job.id);
-    assert.equal(updated.status, 'completed');
-    cleanup(); repoCleanup();
-  });
-
-  test('skips startupCommand when set to empty string', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: '' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
-
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    assert.ok(!octokit.comments.some(c => c.body.toLowerCase().includes('startup')),
-      'Unexpected startup comment when startupCommand is empty string');
-    cleanup(); repoCleanup();
-  });
-
-  test('runs startupCommand in job.repo_path as cwd', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    // Write a sentinel file — startup command echoes it only if cwd is correct
-    const sentinelFile = path.join(repoPath, 'cwd-check.txt');
-    fs.writeFileSync(sentinelFile, 'ok');
-
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'cat cwd-check.txt' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
-
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    // If cwd was correct, `cat cwd-check.txt` exits 0 → startup success comment
-    assert.ok(octokit.comments.some(c => c.body.includes('✅') && c.body.toLowerCase().includes('startup')));
-    cleanup(); repoCleanup();
-  });
-
-  test('startup command runs after global postImplementCommand', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    const order = [];
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = {
-      comments: [],
-      issues: {
-        createComment: async ({ body }) => {
-          octokit.comments.push({ body });
-          if (body.toLowerCase().includes('post-implement hook')) order.push('postImplementCommand');
-          if (body.toLowerCase().includes('startup')) order.push('startup');
-          return { data: { id: octokit.comments.length } };
-        },
-        listComments: async () => ({ data: [] }),
-      },
+    const capturedPrompts = [];
+    const spawnFn = (bin, args) => {
+      const pFlag = args.indexOf('-p');
+      if (pFlag !== -1) capturedPrompts.push(args[pFlag + 1]);
+      return makeChildProcess(capturedPrompts.length === 2 ? ['no clarification needed'] : [], 0);
     };
-    const config = makeConfig('ghp_test', {
-      postImplementCommand: 'echo global-hook',
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo startup' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
 
     await executeJob(db, job, octokit, config, { spawnFn });
 
-    assert.ok(order.includes('postImplementCommand'), 'postImplementCommand should fire');
-    assert.ok(order.includes('startup'), 'startupCommand should fire');
-    assert.ok(order.indexOf('postImplementCommand') < order.indexOf('startup'),
-      'postImplementCommand should fire before startupCommand');
+    const implementPrompt = capturedPrompts.find(p => p.includes('/speckit.implement'));
+    assert.ok(implementPrompt, 'implement stage should have been called');
+    assert.ok(implementPrompt.includes('recompile and redeploy'),
+      'implement prompt should include redeploy instruction');
     cleanup(); repoCleanup();
   });
-});
 
-// ---------- T008: startup command reporting tests (must FAIL before T009) ----------
-
-describe('executeJob — startup command reporting (US2)', () => {
-  test('posts success comment with elapsed time on exit 0', async () => {
+  test('redeploy instruction is NOT appended to non-implement stages', async () => {
     const { db, cleanup } = makeTempDb();
     const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
     writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
@@ -412,64 +311,21 @@ describe('executeJob — startup command reporting (US2)', () => {
     const job = makeJob(repoPath);
     enqueueJob(db, job);
     const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'echo hello' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
+    const config = makeConfig();
+
+    const capturedPrompts = [];
+    const spawnFn = (bin, args) => {
+      const pFlag = args.indexOf('-p');
+      if (pFlag !== -1) capturedPrompts.push(args[pFlag + 1]);
+      return makeChildProcess(capturedPrompts.length === 2 ? ['no clarification needed'] : [], 0);
+    };
 
     await executeJob(db, job, octokit, config, { spawnFn });
 
-    const startupComment = octokit.comments.find(c =>
-      c.body.includes('✅') && c.body.toLowerCase().includes('startup')
-    );
-    assert.ok(startupComment, 'Expected ✅ startup comment');
-    assert.ok(startupComment.body.includes('s)') || startupComment.body.match(/\d+s/),
-      'Comment should include elapsed time');
-    cleanup(); repoCleanup();
-  });
-
-  test('posts failure comment on non-zero exit — job stays completed', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'exit 1' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
-
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    assert.ok(octokit.comments.some(c =>
-      c.body.includes('⚠️') && c.body.toLowerCase().includes('startup')
-    ), 'Expected ⚠️ startup failure comment');
-
-    const updated = getJob(db, job.id);
-    assert.equal(updated.status, 'completed', 'Job should remain completed even when startup fails');
-    cleanup(); repoCleanup();
-  });
-
-  test('failure comment does not call markFailed', async () => {
-    const { db, cleanup } = makeTempDb();
-    const { dir: repoPath, cleanup: repoCleanup } = makeTempRepo();
-    writeArtifacts(repoPath, 'spec.md', 'plan.md', 'tasks.md');
-
-    const job = makeJob(repoPath);
-    enqueueJob(db, job);
-    const octokit = makeOctokit();
-    const config = makeConfig('ghp_test', {
-      repos: [{ repo: 'owner/repo', localPath: repoPath, startupCommand: 'exit 99' }],
-    });
-    const spawnFn = makeSpawnFn([[], ['no clarification needed'], [], [], [], []]);
-
-    await executeJob(db, job, octokit, config, { spawnFn });
-
-    const updated = getJob(db, job.id);
-    assert.equal(updated.status, 'completed');
-    assert.equal(updated.error, null);
+    const nonImplementPrompts = capturedPrompts.filter(p => !p.includes('/speckit.implement'));
+    for (const p of nonImplementPrompts) {
+      assert.ok(!p.includes('recompile'), `non-implement prompt should not include redeploy: ${p.slice(0, 50)}`);
+    }
     cleanup(); repoCleanup();
   });
 });

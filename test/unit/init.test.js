@@ -1,5 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -7,6 +8,7 @@ import {
   buildConfigFromEnv,
   getServicePath,
   buildServiceContent,
+  writeConstitution,
 } from '../../src/cli/init.js';
 
 // T018: prerequisite checker
@@ -132,6 +134,54 @@ describe('getServicePath', () => {
     const p = getServicePath('darwin', '/Users/user');
     assert.ok(p.includes('Library/LaunchAgents'));
     assert.ok(p.endsWith('com.cockpit.daemon.plist'));
+  });
+});
+
+describe('writeConstitution', () => {
+  test('creates .specify/memory/constitution.md when none exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
+    try {
+      writeConstitution(dir, { projectName: 'MyApp', principles: 'Test-first. No hacks.' });
+      const outPath = path.join(dir, '.specify', 'memory', 'constitution.md');
+      assert.ok(fs.existsSync(outPath), 'constitution.md should be created');
+      const content = fs.readFileSync(outPath, 'utf8');
+      assert.ok(content.includes('# MyApp Constitution'));
+      assert.ok(content.includes('Test-first. No hacks.'));
+      assert.ok(content.includes('1.0.0'));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('creates parent directories if they do not exist', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
+    try {
+      writeConstitution(dir, { projectName: 'X', principles: 'Keep it simple.' });
+      assert.ok(fs.existsSync(path.join(dir, '.specify', 'memory', 'constitution.md')));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('skips write and logs a message when constitution already exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-test-'));
+    try {
+      const constitutionPath = path.join(dir, '.specify', 'memory', 'constitution.md');
+      fs.mkdirSync(path.dirname(constitutionPath), { recursive: true });
+      fs.writeFileSync(constitutionPath, '# Original\n');
+
+      const logs = [];
+      const logger = { log: msg => logs.push(msg), warn: msg => logs.push(msg) };
+      writeConstitution(dir, { projectName: 'X', principles: 'New.' }, { logger });
+
+      // File should not have been overwritten
+      assert.ok(fs.readFileSync(constitutionPath, 'utf8').includes('# Original'));
+      // User should be told how to update it
+      assert.ok(logs.some(l => l.includes('already exists')));
+      assert.ok(logs.some(l => l.includes('/speckit.constitution')));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

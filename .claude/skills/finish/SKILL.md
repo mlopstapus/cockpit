@@ -76,7 +76,14 @@ Never `git add .`. Never stage `.env` or secrets. Use conventional commit format
 - Update skill files with improvements
 - Document learnings in memory
 
-### 7. Confirm
+### 7. Restart daemon (cockpit repo only)
+After pushing, restart the daemon so the new code is live:
+```bash
+cockpit restart && sleep 2 && cockpit status
+```
+Verify PID is non-zero. This is required because launchd won't auto-restart after a clean exit.
+
+### 8. Confirm
 Tell user: "Shipped! PR: <url>"
 
 ## Notes
@@ -86,3 +93,4 @@ Tell user: "Shipped! PR: <url>"
 - `/ralph` runs automatically for continuous improvement (Orchestration Engine optimization)
 - `/clean` archives PLAN.md to docs/archive/
 - Autonomous PR creation - ready for human review and merge
+- **Debugging "not picking up" issues**: run `cockpit status` FIRST — daemon being stopped is the most common cause

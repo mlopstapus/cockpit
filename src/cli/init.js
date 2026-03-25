@@ -130,7 +130,11 @@ async function enableService(platform, servicePath) {
     execSync('systemctl --user daemon-reload', { stdio: 'inherit' });
     execSync('systemctl --user enable --now cockpit-daemon', { stdio: 'inherit' });
   } else if (platform === 'darwin') {
-    execSync(`launchctl load "${servicePath}"`, { stdio: 'inherit' });
+    const result = spawnSync('launchctl', ['load', servicePath], { stdio: 'pipe' });
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString().trim();
+      throw new Error(stderr || `launchctl load exited with status ${result.status}`);
+    }
   }
 }
 
@@ -150,6 +154,25 @@ function installSpecifyCli({ which = defaultWhich, logger = console } = {}) {
   }
 }
 
+// ─── Constitution writer ──────────────────────────────────────────────────────
+
+export function writeConstitution(localPath, { projectName, principles }, { logger = console } = {}) {
+  const constitutionPath = path.join(localPath, '.specify', 'memory', 'constitution.md');
+
+  if (fs.existsSync(constitutionPath)) {
+    logger.log(`Constitution already exists at ${constitutionPath}.`);
+    logger.log('To update it, open an issue: [COCKPIT] update constitution, or run /speckit.constitution in the repo.');
+    return false;
+  }
+
+  const dir = path.join(localPath, '.specify', 'memory');
+  fs.mkdirSync(dir, { recursive: true });
+  const date = new Date().toISOString().split('T')[0];
+  const content = `# ${projectName} Constitution\n\n## Core Principles\n\n${principles}\n\n**Version**: 1.0.0 | **Ratified**: ${date}\n`;
+  fs.writeFileSync(constitutionPath, content, 'utf8');
+  return true;
+}
+
 // ─── Next-steps printer ──────────────────────────────────────────────────────
 
 function printNextSteps(logger = console) {
@@ -158,13 +181,9 @@ function printNextSteps(logger = console) {
   logger.log('');
   logger.log('  cockpit status          — check daemon health');
   logger.log('  cockpit start           — start the daemon (if not already running)');
-  logger.log('  specify init --here --ai claude   — initialise spec-kit in a watched repo');
   logger.log('');
   logger.log('Open a GitHub issue in a watched repo titled:');
   logger.log('  [COCKPIT] <your feature name>');
-  logger.log('');
-  logger.log('To define project principles:');
-  logger.log('  /speckit.constitution');
 }
 
 // ─── Main runInit entry point ─────────────────────────────────────────────────
@@ -180,6 +199,7 @@ export async function runInit(options = {}) {
 
   // Step 2: Collect config
   let config;
+  let constitutions = [];
   if (yes) {
     try {
       config = buildConfigFromEnv(options.env || process.env);
@@ -188,8 +208,10 @@ export async function runInit(options = {}) {
       process.exit(1);
     }
   } else {
-    config = await collectConfigInteractive({ configDir, logger });
-    if (!config) return; // user cancelled
+    const result = await collectConfigInteractive({ configDir, logger });
+    if (!result) return; // user cancelled
+    config = result.config;
+    constitutions = result.constitutions;
   }
 
   // Step 3: Validate
@@ -224,7 +246,17 @@ export async function runInit(options = {}) {
   // Step 7: Install specify-cli
   installSpecifyCli({ logger });
 
-  // Step 8: Print next steps
+  // Step 8: Write constitutions
+  for (const { localPath, projectName, principles } of constitutions) {
+    try {
+      const wrote = writeConstitution(localPath, { projectName, principles }, { logger });
+      if (wrote) logger.log(`Constitution written to ${localPath}/.specify/memory/constitution.md`);
+    } catch (err) {
+      logger.warn(`Could not write constitution for ${localPath}: ${err.message}`);
+    }
+  }
+
+  // Step 9: Print next steps
   printNextSteps(logger);
 }
 
@@ -268,14 +300,40 @@ async function collectConfigInteractive({ configDir, logger }) {
     const repoName = await text({ message: 'Repo to watch (owner/name format):', validate: v => /^[\w.-]+\/[\w.-]+$/.test(v.trim()) ? undefined : 'Use owner/name format' });
     if (isCancel(repoName)) { outro('Cancelled.'); return null; }
 
-    const localPath = await text({ message: `Local clone path for ${repoName}:`, validate: v => v.trim() ? undefined : 'Required' });
-    if (isCancel(localPath)) { outro('Cancelled.'); return null; }
+    const alreadyCloned = await confirm({
+      message: `Have you already cloned ${repoName.trim()} locally?`,
+      initialValue: true,
+    });
+    if (isCancel(alreadyCloned)) { outro('Cancelled.'); return null; }
 
-    if (!fs.existsSync(localPath.trim())) {
-      logger.warn(`Warning: path '${localPath.trim()}' does not exist on disk. You can continue and fix this later.`);
+    let resolvedPath;
+    if (alreadyCloned) {
+      const localPath = await text({ message: `Local path to your clone of ${repoName.trim()}:`, validate: v => v.trim() ? undefined : 'Required' });
+      if (isCancel(localPath)) { outro('Cancelled.'); return null; }
+      resolvedPath = localPath.trim();
+      if (!fs.existsSync(resolvedPath)) {
+        logger.warn(`Warning: path '${resolvedPath}' does not exist. You can fix this later.`);
+      }
+    } else {
+      const defaultPath = path.join(os.homedir(), 'repos', repoName.trim().split('/')[1]);
+      const clonePath = await text({
+        message: `Where should it be cloned? (local destination path)`,
+        initialValue: defaultPath,
+        validate: v => v.trim() ? undefined : 'Required',
+      });
+      if (isCancel(clonePath)) { outro('Cancelled.'); return null; }
+      resolvedPath = clonePath.trim();
+      try {
+        const parentDir = path.dirname(resolvedPath);
+        fs.mkdirSync(parentDir, { recursive: true });
+        execSync(`git clone https://github.com/${repoName.trim()} ${resolvedPath}`, { stdio: 'inherit' });
+        logger.log(`Cloned ${repoName.trim()} to ${resolvedPath}`);
+      } catch (err) {
+        logger.warn(`Clone failed: ${err.message}. You can fix this later.`);
+      }
     }
 
-    repos.push({ repo: repoName.trim(), localPath: localPath.trim() });
+    repos.push({ repo: repoName.trim(), localPath: resolvedPath });
 
     const more = await confirm({ message: 'Add another repo?', initialValue: false });
     if (isCancel(more) || !more) addMore = false;
@@ -283,11 +341,40 @@ async function collectConfigInteractive({ configDir, logger }) {
 
   outro('Config collected.');
 
+  // Prompt for constitution per repo (only for repos with existing local paths)
+  const constitutions = [];
+  for (const repo of repos) {
+    if (!fs.existsSync(repo.localPath)) continue;
+
+    const wantConstitution = await confirm({
+      message: `Define project principles for ${repo.repo}? (writes .specify/memory/constitution.md)`,
+      initialValue: true,
+    });
+    if (isCancel(wantConstitution) || !wantConstitution) continue;
+
+    const projectName = await text({
+      message: `Project name for ${repo.repo}:`,
+      defaultValue: repo.repo.split('/')[1],
+    });
+    if (isCancel(projectName)) continue;
+
+    const principles = await text({
+      message: 'Core principles (brief description of how Claude should approach work in this repo):',
+      validate: v => v.trim() ? undefined : 'Required',
+    });
+    if (isCancel(principles)) continue;
+
+    constitutions.push({ localPath: repo.localPath, projectName: projectName.trim(), principles: principles.trim() });
+  }
+
   return {
-    githubToken: token,
-    githubOwner: owner.trim(),
-    pollIntervalSeconds: 30,
-    postImplementCommand: '',
-    repos,
+    config: {
+      githubToken: token,
+      githubOwner: owner.trim(),
+      pollIntervalSeconds: 30,
+      postImplementCommand: '',
+      repos,
+    },
+    constitutions,
   };
 }

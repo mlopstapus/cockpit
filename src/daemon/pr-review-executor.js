@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process';
-import { execFile } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { markPrReviewComplete, resetPrReviewToQueued } from '../db/pr-reviews.js';
 import { postPRComment } from '../github/commenter.js';
 import { RateLimitError } from '../github/client.js';
@@ -106,7 +105,7 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
 
   // Step 2: Run Claude
   try {
-    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}`;
+    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}\n\nOnce you are done, make sure to recompile and redeploy the application so that all new changes are picked up.`;
     log(`[cockpit] PR review job ${review.id}: running Claude`);
     await runClaude(claudeBin, review.repo_path, prompt, (line) => log(line), spawnFn);
   } catch (err) {

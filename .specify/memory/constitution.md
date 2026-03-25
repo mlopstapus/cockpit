@@ -1,14 +1,16 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.2.0 → 1.2.1
+Version change: 1.2.1 → 1.3.0
 Modified principles:
-  - VI. Continuous Self-Improvement — clarified: /ralph MUST be run at session close
-    as the canonical mechanism for the self-improvement ritual
+  - VI. Continuous Self-Improvement → VI. Always Self-Reflect
+    (renamed and reframed: self-reflection elevated as explicit, declarative principle;
+    self-improvement ritual and /ralph invocation retained within new framing)
+Fixed: version line corrected from erroneous 1.0.0 to 1.3.0
 Added sections: N/A
 Removed sections: N/A
 Templates requiring updates:
-  ✅ .specify/templates/plan-template.md  — No changes needed
+  ✅ .specify/templates/plan-template.md  — Constitution Check row VI updated
   ✅ .specify/templates/tasks-template.md — No changes needed
   ✅ .specify/templates/spec-template.md  — No changes needed
   ✅ .specify/templates/agent-file-template.md — No changes needed
@@ -100,27 +102,31 @@ a containerised service. This is the non-negotiable execution model.
 - Infrastructure services (e.g., Redis) MAY run in containers for isolation,
   but the agent and its spawned processes MUST run on the host.
 
-### VI. Continuous Self-Improvement
+### VI. Always Self-Reflect
 
-Each session MUST leave the system better than it found it. Agent sessions and
-human collaborators MUST capture learnings, surface tech debt, and sharpen
-tooling at session close — not defer improvement to a hypothetical later time.
+Before finalising any output — code, plan, comment, spec, or configuration
+change — the agent MUST pause and critically evaluate its own work. Self-
+reflection is the primary quality gate when no live reviewer is present.
 
+- The agent MUST ask "Is this the simplest correct approach?" before
+  committing to a design.
+- Assumptions MUST be identified and verified before acting on them.
+- Unintended side-effects on adjacent modules MUST be checked.
+- Output MUST be reviewed against the spec and acceptance criteria before
+  the agent declares a task complete.
 - At the end of every session, memory MUST be updated with any new user
   preferences, feedback, project context, or non-obvious discoveries that
   would improve future sessions.
 - Prompt and workflow templates (`.specify/templates/`, `.specify/memory/`)
   MUST be revised when a session reveals ambiguity, missing guidance, or a
   better default approach.
-- Any future work items — new features, tech debt, or quality improvements —
-  identified during a session MUST be logged to the `backlog/` directory before
-  the session closes.
-- Backlog entries MUST include: a short title, the motivation (why it matters),
-  and a rough priority (P1 critical / P2 important / P3 nice-to-have).
+- Any future work items identified during a session MUST be logged to the
+  `backlog/` directory with a short title, motivation, and rough priority
+  (P1 critical / P2 important / P3 nice-to-have).
 - Improvements to templates or memory MUST NOT be deferred; they MUST be
   committed in the same session they are identified.
 - The `/ralph` skill MUST be invoked at the close of every session as the
-  canonical mechanism for executing the self-improvement ritual: reviewing the
+  canonical mechanism for executing the self-reflection ritual: reviewing the
   session, updating memory, improving prompts, and logging backlog items.
 
 ## Security Requirements
@@ -179,8 +185,8 @@ project. Amendments require:
 
 **Compliance Review**
 All PRs MUST include a Constitution Check confirming compliance with all six
-principles. Complexity that violates a principle MUST be justified in the plan's
+principles (I–VI). Complexity that violates a principle MUST be justified in the plan's
 Complexity Tracking table. Runtime development guidance lives in
 `.specify/templates/agent-file-template.md`.
 
-**Version**: 1.2.1 | **Ratified**: 2026-03-17 | **Last Amended**: 2026-03-23
+**Version**: 1.3.0 | **Ratified**: 2026-03-25 | **Last Amended**: 2026-03-25
