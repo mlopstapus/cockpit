@@ -8,6 +8,7 @@ import {
   enqueueJob, dequeueJob, markActive, markComplete, markFailed, markCancelled,
   getJob, listActive, listRecent, makeJobId,
   markRateLimited, requeueExpiredRateLimited, listRateLimited, requeueInterrupted,
+  retryJob, getLastFailedJob,
 } from '../../src/db/jobs.js';
 import { appendLog, getLogTail } from '../../src/db/logs.js';
 import { isCommentSeen, markCommentSeen } from '../../src/db/comments.js';
@@ -381,5 +382,145 @@ describe('requeueInterrupted — leaves rate_limited jobs untouched', () => {
     requeueInterrupted(db);
     assert.equal(getJob(db, activeJob.id).status, 'queued');
     assert.equal(getJob(db, rlJob.id).status, 'rate_limited');
+  });
+});
+
+// ── retryJob ─────────────────────────────────────────────────────────────────
+
+describe('retryJob', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('success: resets failed job to queued, preserves stage, clears error + rate_limit', () => {
+    const job = makeJob({ issue_number: 700, stage: 'implement' });
+    enqueueJob(db, job);
+    markFailed(db, job.id, 'PTY exited');
+    // simulate a prior rate-limit count so we can verify it resets
+    db.prepare("UPDATE jobs SET rate_limit_count = 2 WHERE id = ?").run(job.id);
+
+    const result = retryJob(db, job.id);
+
+    assert.equal(result.success, true);
+    const updated = getJob(db, job.id);
+    assert.equal(updated.status, 'queued');
+    assert.equal(updated.stage, 'implement');   // stage preserved
+    assert.equal(updated.error, null);
+    assert.equal(updated.rate_limit_count, 0);
+    assert.equal(updated.rate_limit_reset_at, null);
+  });
+
+  test('not_found: returns failure for unknown id', () => {
+    const result = retryJob(db, 'no-such-id');
+    assert.equal(result.success, false);
+    assert.equal(result.reason, 'not_found');
+  });
+
+  test('wrong_state queued: cannot retry a queued job', () => {
+    const job = makeJob({ issue_number: 701 });
+    enqueueJob(db, job);
+    const result = retryJob(db, job.id);
+    assert.equal(result.success, false);
+    assert.equal(result.reason, 'wrong_state');
+    assert.equal(result.status, 'queued');
+  });
+
+  test('wrong_state active: cannot retry an active job', () => {
+    const job = makeJob({ issue_number: 702 });
+    enqueueJob(db, job);
+    markActive(db, job.id);
+    const result = retryJob(db, job.id);
+    assert.equal(result.success, false);
+    assert.equal(result.reason, 'wrong_state');
+    assert.equal(result.status, 'active');
+  });
+
+  test('wrong_state completed: cannot retry a completed job', () => {
+    const job = makeJob({ issue_number: 703 });
+    enqueueJob(db, job);
+    markComplete(db, job.id);
+    const result = retryJob(db, job.id);
+    assert.equal(result.success, false);
+    assert.equal(result.reason, 'wrong_state');
+    assert.equal(result.status, 'completed');
+  });
+
+  test('wrong_state cancelled: cannot retry a cancelled job', () => {
+    const job = makeJob({ issue_number: 704 });
+    enqueueJob(db, job);
+    markCancelled(db, job.id);
+    const result = retryJob(db, job.id);
+    assert.equal(result.success, false);
+    assert.equal(result.reason, 'wrong_state');
+    assert.equal(result.status, 'cancelled');
+  });
+
+  test('null-stage fallback: job with stage=idle still retries successfully', () => {
+    const job = makeJob({ issue_number: 705, stage: 'idle' });
+    enqueueJob(db, job);
+    markFailed(db, job.id, 'failed early');
+    const result = retryJob(db, job.id);
+    assert.equal(result.success, true);
+    assert.equal(getJob(db, job.id).stage, 'idle');
+  });
+});
+
+// ── getLastFailedJob ──────────────────────────────────────────────────────────
+
+describe('getLastFailedJob', () => {
+  let db;
+  before(() => { db = openDb(':memory:'); });
+  after(() => { db.close(); });
+
+  test('returns null when no failed jobs exist', () => {
+    const result = getLastFailedJob(db);
+    assert.equal(result, null);
+  });
+
+  test('returns the single failed job', () => {
+    const job = makeJob({ issue_number: 710 });
+    enqueueJob(db, job);
+    markFailed(db, job.id, 'test error');
+    const result = getLastFailedJob(db);
+    assert.ok(result);
+    assert.equal(result.id, job.id);
+    assert.equal(result.status, 'failed');
+  });
+
+  test('returns most recently updated failed job when multiple exist', () => {
+    const freshDb = openDb(':memory:');
+    try {
+      const older = makeJob({ issue_number: 711 });
+      const newer = makeJob({ issue_number: 712 });
+      enqueueJob(freshDb, older);
+      enqueueJob(freshDb, newer);
+      markFailed(freshDb, older.id, 'old error');
+      markFailed(freshDb, newer.id, 'new error');
+      freshDb.prepare("UPDATE jobs SET updated_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(older.id);
+      freshDb.prepare("UPDATE jobs SET updated_at = '2025-01-02T00:00:00.000Z' WHERE id = ?").run(newer.id);
+
+      const result = getLastFailedJob(freshDb);
+      assert.ok(result);
+      assert.equal(result.id, newer.id);
+    } finally {
+      freshDb.close();
+    }
+  });
+
+  test('ignores non-failed jobs when finding last failed', () => {
+    const freshDb = openDb(':memory:');
+    try {
+      const failed = makeJob({ issue_number: 713 });
+      const active = makeJob({ issue_number: 714 });
+      enqueueJob(freshDb, failed);
+      enqueueJob(freshDb, active);
+      markFailed(freshDb, failed.id, 'oops');
+      markActive(freshDb, active.id);
+      const result = getLastFailedJob(freshDb);
+      assert.ok(result);
+      assert.equal(result.id, failed.id);
+    } finally {
+      freshDb.close();
+    }
   });
 });

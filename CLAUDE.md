@@ -126,6 +126,8 @@ cockpit repos list                      List watched repos
 cockpit repos add <owner/repo> <path>   Add repo
 cockpit repos remove <owner/repo>       Remove repo
 cockpit token                           Rotate GitHub token
+cockpit retry <job-id>                  Requeue a failed job (resumes from failed stage)
+cockpit retry --last                    Requeue the most recently failed job
 ```
 
 ## Testing
@@ -178,7 +180,10 @@ Only issues from `githubOwner` are processed.
 - Node.js 18+ ESM + `@clack/prompts` (existing), `node:child_process` (spawnSync — existing), `node:fs`, `node:path`, `node:os` (006-init-speckit-constitution)
 - `~/.cockpit/config.json` (existing schema, unchanged) + `<repo>/.specify/memory/constitution.md` (new file in target repo) (006-init-speckit-constitution)
 - Markdown (no build step) + None — static files only (007-public-readme-docs)
+- Node.js 18+ ESM + `commander@12`, `chalk`, `better-sqlite3` (all already in-tree) (008-cli-retry-command)
+- SQLite at `~/.cockpit/cockpit.db` — no schema changes needed (008-cli-retry-command)
 
 ## Recent Changes
+- 008-cli-retry-command: Added `cockpit retry <job-id>` and `cockpit retry --last` subcommands; resets status→queued and error→null while preserving stage so pipeline resumes from point of failure; resets rate_limit_count to 0 for a fresh automatic retry budget
 - 005-claude-rate-limits: Detect Claude API rate limits from stdout/stderr, persist rate_limited status to SQLite with reset time, auto-requeue after reset, retry cap of 3, show in `cockpit status`
 - 003-repo-startup-command: Added Node.js 18+ ESM + better-sqlite3, @octokit/rest, commander@12, @clack/prompts, chalk, node-pty

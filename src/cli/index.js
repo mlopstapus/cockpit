@@ -5,6 +5,7 @@ import { startDaemon, stopDaemon, restartDaemon, showStatus } from './daemon-con
 import { showLogs } from './logs.js';
 import { repoList, repoAdd, repoRemove } from './repos.js';
 import { rotateToken } from './token.js';
+import { retryFailedJob } from './retry.js';
 import { listRecent } from '../db/jobs.js';
 import chalk from 'chalk';
 import { expandHome, readConfig } from '../config/index.js';
@@ -138,6 +139,18 @@ program
       console.log(`${chalk.bold(j.id)}  ${statusColor(j.status.padEnd(9))}  ${ts}  ${j.spec_name}`);
       if (j.error) console.log(`  ${chalk.red('error:')} ${j.error}`);
     }
+  });
+
+// cockpit retry
+program
+  .command('retry [job-id]')
+  .description('Requeue a failed job for re-execution')
+  .option('--last', 'Retry the most recently failed job')
+  .action((jobId, opts) => {
+    const db = openDbSafe();
+    if (!db) { console.error('Error: no database found. Run cockpit init first.'); process.exit(1); }
+    retryFailedJob(db, jobId, opts);
+    db.close();
   });
 
 // cockpit token
