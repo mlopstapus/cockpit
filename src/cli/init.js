@@ -10,6 +10,12 @@ const TEMPLATES_DIR = path.join(__dirname, '../templates');
 
 // ─── Pure helpers (exported for unit testing) ───────────────────────────────
 
+export function maskToken(token) {
+  if (!token || token.length <= 8) return '***';
+  return token.slice(0, 4) + '***...' + token.slice(-4);
+}
+
+
 export function buildServiceContent(templateContent, tokens) {
   return Object.entries(tokens).reduce(
     (acc, [token, value]) => acc.split(token).join(value),
@@ -265,37 +271,75 @@ export async function runInit(options = {}) {
 async function collectConfigInteractive({ configDir, logger }) {
   const { intro, outro, text, password, confirm, isCancel } = await import('@clack/prompts');
 
-  // Check for existing config
+  // T003: Load existing config (no confirm gate — go straight to pre-filled wizard)
   const existingPath = path.join(configDir, 'config.json');
+  let existing = null;
   if (fs.existsSync(existingPath)) {
-    const { createRequire } = await import('node:module');
-    let existing;
     try {
       existing = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
     } catch {
+      // T004: Warn on malformed config, fall back to fresh setup
+      logger.warn('Config file could not be read — starting fresh setup.');
       existing = null;
-    }
-    if (existing) {
-      const update = await confirm({
-        message: `Existing config found at ${existingPath}. Update it?`,
-      });
-      if (isCancel(update) || !update) {
-        outro('Cancelled.');
-        return null;
-      }
     }
   }
 
   intro('Cockpit Setup Wizard');
 
-  const token = await password({ message: 'GitHub personal access token (repo scope):' });
-  if (isCancel(token)) { outro('Cancelled.'); return null; }
+  // T009: Token prompt — show masked hint when existing token is present
+  let token;
+  if (existing?.githubToken) {
+    const hint = maskToken(existing.githubToken);
+    const raw = await password({
+      message: `GitHub personal access token [current: ${hint}, Enter to keep]:`,
+    });
+    if (isCancel(raw)) { outro('Cancelled.'); return null; }
+    token = raw.trim() === '' ? existing.githubToken : raw;
+  } else {
+    const raw = await password({ message: 'GitHub personal access token (repo scope):' });
+    if (isCancel(raw)) { outro('Cancelled.'); return null; }
+    token = raw;
+  }
 
-  const owner = await text({ message: 'GitHub username (only issues from this account will be processed):', validate: v => v.trim() ? undefined : 'Required' });
+  // T005: Pre-fill owner with existing value
+  const owner = await text({
+    message: 'GitHub username (only issues from this account will be processed):',
+    initialValue: existing?.githubOwner ?? '',
+    validate: v => v.trim() ? undefined : 'Required',
+  });
   if (isCancel(owner)) { outro('Cancelled.'); return null; }
 
-  const repos = [];
-  let addMore = true;
+  // T006: Poll interval prompt with existing value
+  const pollIntervalRaw = await text({
+    message: 'Poll interval in seconds:',
+    initialValue: String(existing?.pollIntervalSeconds ?? 30),
+    validate: v => /^\d+$/.test(v.trim()) ? undefined : 'Must be a number',
+  });
+  if (isCancel(pollIntervalRaw)) { outro('Cancelled.'); return null; }
+
+  // T007: Post-implement command prompt with existing value
+  const postCmd = await text({
+    message: 'Post-implement shell command (optional, runs after each implement stage):',
+    initialValue: existing?.postImplementCommand ?? '',
+  });
+  if (isCancel(postCmd)) { outro('Cancelled.'); return null; }
+
+  // T010/T011: Repos — print summary of existing repos, then offer to add more
+  const repos = existing?.repos?.length > 0 ? [...existing.repos] : [];
+  if (repos.length > 0) {
+    logger.log('\nWatched repos:');
+    for (const r of repos) {
+      logger.log(`  • ${r.repo}  →  ${r.localPath}`);
+    }
+  }
+
+  let addMore = repos.length === 0; // always enter loop on first run; ask on re-run
+  if (repos.length > 0) {
+    const more = await confirm({ message: 'Add another repo?', initialValue: false });
+    if (isCancel(more)) { outro('Cancelled.'); return null; }
+    addMore = !!more;
+  }
+
   while (addMore) {
     const repoName = await text({ message: 'Repo to watch (owner/name format):', validate: v => /^[\w.-]+\/[\w.-]+$/.test(v.trim()) ? undefined : 'Use owner/name format' });
     if (isCancel(repoName)) { outro('Cancelled.'); return null; }
@@ -367,12 +411,13 @@ async function collectConfigInteractive({ configDir, logger }) {
     constitutions.push({ localPath: repo.localPath, projectName: projectName.trim(), principles: principles.trim() });
   }
 
+  // T008: Use prompted values for pollIntervalSeconds and postImplementCommand
   return {
     config: {
       githubToken: token,
       githubOwner: owner.trim(),
-      pollIntervalSeconds: 30,
-      postImplementCommand: '',
+      pollIntervalSeconds: parseInt(pollIntervalRaw.trim(), 10),
+      postImplementCommand: postCmd.trim(),
       repos,
     },
     constitutions,

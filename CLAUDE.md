@@ -184,6 +184,8 @@ Only issues from `githubOwner` are processed.
 - SQLite at `~/.cockpit/cockpit.db` — no schema changes needed (008-cli-retry-command)
 - Node.js 18+ ESM + `better-sqlite3`, `@octokit/rest`, `commander@12`, `node-pty`, `chalk` (all existing) (009-detailed-pr-responses)
 - SQLite via `better-sqlite3` (`~/.cockpit/cockpit.db`) — no changes (009-detailed-pr-responses)
+- Node.js 18+ ESM + `@clack/prompts` (existing), `commander@12` (existing), `chalk` (existing) (010-init-preserve-config)
+- `~/.cockpit/config.json` (JSON file, read at wizard start; schema unchanged) (010-init-preserve-config)
 
 ## Recent Changes
 - 008-cli-retry-command: Added `cockpit retry <job-id>` and `cockpit retry --last` subcommands; resets status→queued and error→null while preserving stage so pipeline resumes from point of failure; resets rate_limit_count to 0 for a fresh automatic retry budget

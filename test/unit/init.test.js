@@ -9,6 +9,7 @@ import {
   getServicePath,
   buildServiceContent,
   writeConstitution,
+  maskToken,
 } from '../../src/cli/init.js';
 
 // T018: prerequisite checker
@@ -182,6 +183,33 @@ describe('writeConstitution', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// T001: maskToken helper
+describe('maskToken', () => {
+  test('long token shows first 4 + ***... + last 4', () => {
+    assert.equal(maskToken('ghp_abcdefghijklmnop'), 'ghp_***...mnop');
+  });
+
+  test('short token (<=8 chars) returns ***', () => {
+    assert.equal(maskToken('abc'), '***');
+    assert.equal(maskToken('12345678'), '***');
+  });
+
+  test('exactly 9 chars shows first 4 + ***... + last 4', () => {
+    assert.equal(maskToken('123456789'), '1234***...6789');
+  });
+
+  test('non-ghp prefix still masks correctly', () => {
+    assert.equal(maskToken('github_pat_abc123xyz789'), 'gith***...z789');
+  });
+
+  test('never returns the full token for tokens longer than 8 chars', () => {
+    const token = 'ghp_averylongtokenthatshouldbefullymasked';
+    const result = maskToken(token);
+    assert.ok(!result.includes(token), 'full token must not appear in masked output');
+    assert.ok(result.includes('***...'), 'masked output must contain ***...');
   });
 });
 
