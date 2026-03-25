@@ -32,3 +32,10 @@ export function resetPrReviewToQueued(db, id) {
     "UPDATE pr_review_jobs SET status = 'queued' WHERE id = ?"
   ).run(id);
 }
+
+export function requeueInterruptedPrReviews(db) {
+  const result = db.prepare(
+    "UPDATE pr_review_jobs SET status = 'queued' WHERE status = 'active'"
+  ).run();
+  return result.changes;
+}

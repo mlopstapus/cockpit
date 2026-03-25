@@ -3,6 +3,43 @@ import { markPrReviewComplete, resetPrReviewToQueued } from '../db/pr-reviews.js
 import { postPRComment } from '../github/commenter.js';
 import { RateLimitError } from '../github/client.js';
 
+const CHANGES_MADE_RE = /## Changes Made\n([\s\S]*?)(?=\n## |\n# |$)/;
+
+// Extract the "## Changes Made" section from Claude's output.
+// Returns trimmed content or empty string if section is absent.
+export function extractChangesSection(output) {
+  if (!output) return '';
+  const match = output.match(CHANGES_MADE_RE);
+  return match ? match[1].trim() : '';
+}
+
+const MAX_COMMENT_LENGTH = 8000;
+
+// Build the structured success comment shown on the PR after changes are pushed.
+// commentBody: the original review comment text (from comment_body field).
+// changesSection: extracted "Changes Made" content (may be empty string).
+export function buildSuccessComment(commentBody, changesSection) {
+  const blockquote = (commentBody || '')
+    .split('\n')
+    .map(line => `> ${line}`)
+    .join('\n');
+
+  const addressedSection = `✅ **Changes pushed to branch**\n\n### What was addressed\n\n${blockquote}`;
+
+  if (!changesSection) {
+    return `${addressedSection}\n\n*No changes summary was generated.*`;
+  }
+
+  const changedHeader = '\n\n### What was changed\n\n';
+  const full = addressedSection + changedHeader + changesSection;
+  if (full.length <= MAX_COMMENT_LENGTH) return full;
+
+  // Truncate changesSection to fit within the limit
+  const truncationMarker = '\n… (truncated)';
+  const budget = MAX_COMMENT_LENGTH - addressedSection.length - changedHeader.length - truncationMarker.length;
+  return addressedSection + changedHeader + changesSection.slice(0, budget) + truncationMarker;
+}
+
 const CLAUDE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 // Count how many comment sections are in a batched comment_body
@@ -50,6 +87,8 @@ function runClaude(claudeBin, repoPath, prompt, onLine, spawnFn) {
 }
 
 // Commit and push all changes in repoPath.
+// Returns { pushed: true } if changes were committed and pushed,
+// or { pushed: false } if there was nothing to commit (Claude only explained, no edits).
 function gitPush(repoPath, execFileFn) {
   const execImpl = execFileFn || ((bin, args, opts, cb) => execFile(bin, args, opts, cb));
   return new Promise((resolve, reject) => {
@@ -57,9 +96,15 @@ function gitPush(repoPath, execFileFn) {
       '/bin/sh',
       ['-c', 'git add -A && git commit -m "Apply PR review feedback" && git push'],
       { timeout: 60000, cwd: repoPath },
-      (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+      (err, stdout, stderr) => {
+        if (!err) return resolve({ pushed: true });
+        const msg = (stderr || stdout || err.message || '').toLowerCase();
+        if (msg.includes('nothing to commit') || msg.includes('nothing added to commit')) {
+          return resolve({ pushed: false });
+        }
+        const detail = stderr || stdout || err.message;
+        const gitErr = new Error(detail);
+        reject(gitErr);
       }
     );
   });
@@ -104,10 +149,11 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
   }
 
   // Step 2: Run Claude
+  let claudeOutput = '';
   try {
-    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}\n\nOnce you are done, make sure to recompile and redeploy the application so that all new changes are picked up.`;
+    const prompt = `You are implementing changes requested via PR review comments.\n\nReview comments to address:\n\n${review.comment_body}\n\nAt the end of your response, include a section headed exactly:\n\n## Changes Made\n\nList one bullet for each review comment you addressed, describing concisely what you changed. Do not include file names or line numbers — focus on what was wrong and what you fixed.`;
     log(`[cockpit] PR review job ${review.id}: running Claude`);
-    await runClaude(claudeBin, review.repo_path, prompt, (line) => log(line), spawnFn);
+    claudeOutput = await runClaude(claudeBin, review.repo_path, prompt, (line) => log(line), spawnFn);
   } catch (err) {
     log(`[cockpit] Claude failed: ${err.message}`);
     await postPRComment(
@@ -120,10 +166,14 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
     return;
   }
 
-  // Step 3: Commit + push
+  const changesSection = extractChangesSection(claudeOutput);
+
+  // Step 3: Commit + push (skip gracefully if Claude made no file changes)
+  let pushed = false;
   try {
     log(`[cockpit] PR review job ${review.id}: pushing changes`);
-    await gitPush(review.repo_path, execFileFn);
+    ({ pushed } = await gitPush(review.repo_path, execFileFn));
+    if (!pushed) log(`[cockpit] No file changes — skipping commit`);
   } catch (err) {
     log(`[cockpit] git push failed: ${err.message}`);
     await postPRComment(
@@ -136,13 +186,17 @@ export async function executePrReview(db, review, octokit, config, opts = {}) {
     return;
   }
 
-  // Step 4: Success
-  await postPRComment(
-    octokit,
-    review.github_repo,
-    review.pr_number,
-    `✅ Changes pushed to branch`
-  ).catch((err) => log(`[cockpit] Failed to post success comment: ${err.message}`));
+  // Step 4: Post response (always — whether changes were pushed or it was explanation-only)
+  const successComment = pushed
+    ? buildSuccessComment(review.comment_body, changesSection)
+    : `💬 **Response**\n\n${changesSection || claudeOutput.trim()}`;
+  try {
+    await postPRComment(octokit, review.github_repo, review.pr_number, successComment);
+  } catch (err) {
+    log(`[cockpit] Failed to post success comment: ${err.message} — resetting to queued for retry`);
+    resetPrReviewToQueued(db, review.id);
+    return;
+  }
 
   markPrReviewComplete(db, review.id);
   log(`[cockpit] PR review job ${review.id}: completed`);

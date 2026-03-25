@@ -34,9 +34,14 @@ export async function listPRComments(octokit, repoFullName, prNumber, since) {
   const params = { owner, repo, per_page: 100 };
   if (since) params.since = since;
 
+  const handle304 = (err) => {
+    if (err.status === 304) return { data: [] };
+    throw err;
+  };
+
   const [issueRes, reviewRes] = await Promise.all([
-    octokit.issues.listComments({ ...params, issue_number: prNumber }),
-    octokit.pulls.listReviewComments({ ...params, pull_number: prNumber }),
+    octokit.issues.listComments({ ...params, issue_number: prNumber }).catch(handle304),
+    octokit.pulls.listReviewComments({ ...params, pull_number: prNumber }).catch(handle304),
   ]);
 
   return [

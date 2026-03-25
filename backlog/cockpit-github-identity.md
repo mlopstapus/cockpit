@@ -1,0 +1,1 @@
+Right now cockpit only creates comments on the issues as the user's github identity. This can be kind of confusing. I'd like cockpit to have it's own github identity.

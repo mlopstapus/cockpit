@@ -1,7 +1,7 @@
 import { dequeueJob, markActive, markComplete, markFailed } from '../db/jobs.js';
 import { appendLog } from '../db/logs.js';
 import { executeJob, redactSecrets } from './stage-executor.js';
-import { dequeuePrReview } from '../db/pr-reviews.js';
+import { dequeuePrReview, resetPrReviewToQueued } from '../db/pr-reviews.js';
 import { executePrReview } from './pr-review-executor.js';
 
 export async function runNextJob(db, octokit, config) {
@@ -27,5 +27,6 @@ export async function runNextPrReview(db, octokit, config) {
     await executePrReview(db, review, octokit, config);
   } catch (err) {
     console.error(`[pr-review:${review.id}] FATAL: ${err.message}`);
+    resetPrReviewToQueued(db, review.id);
   }
 }
