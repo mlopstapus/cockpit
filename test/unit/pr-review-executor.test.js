@@ -7,7 +7,7 @@ import path from 'node:path';
 import { openDb } from '../../src/db/index.js';
 import { makeJobId } from '../../src/db/jobs.js';
 import { enqueuePrReview, dequeuePrReview } from '../../src/db/pr-reviews.js';
-import { executePrReview } from '../../src/daemon/pr-review-executor.js';
+import { executePrReview, extractChangesSection, buildSuccessComment } from '../../src/daemon/pr-review-executor.js';
 import { RateLimitError } from '../../src/github/client.js';
 
 // ---------- helpers ----------
@@ -249,6 +249,168 @@ describe('executePrReview — batch acknowledgement message (US2)', () => {
 
     assert.ok(octokit._comments[0].includes('1 comment(s)'),
       `ack should say "1 comment(s)", got: ${octokit._comments[0]}`);
+
+    cleanup();
+  });
+});
+
+// T003 — extractChangesSection unit tests
+describe('extractChangesSection', () => {
+  test('section present mid-output — returns content between ## Changes Made and next heading', () => {
+    const output = 'Some work done.\n\n## Changes Made\n- Fixed error handling\n- Added validation\n\n## Other Section\nmore text';
+    const result = extractChangesSection(output);
+    assert.ok(result.includes('- Fixed error handling'), `expected change bullets, got: ${result}`);
+    assert.ok(result.includes('- Added validation'), `expected second bullet, got: ${result}`);
+    assert.ok(!result.includes('## Other Section'), 'should not bleed into next heading');
+  });
+
+  test('section absent — returns empty string', () => {
+    const output = 'Implementation done. No structured section here.';
+    assert.equal(extractChangesSection(output), '');
+  });
+
+  test('section at end of string with no trailing heading — returns content through EOF', () => {
+    const output = 'Work complete.\n\n## Changes Made\n- Removed duplicate check\n- Refactored loop';
+    const result = extractChangesSection(output);
+    assert.ok(result.includes('- Removed duplicate check'), `expected bullet, got: ${result}`);
+    assert.ok(result.includes('- Refactored loop'), `expected second bullet, got: ${result}`);
+  });
+
+  test('empty/null input — returns empty string', () => {
+    assert.equal(extractChangesSection(''), '');
+    assert.equal(extractChangesSection(null), '');
+  });
+});
+
+// T004 — buildSuccessComment unit tests
+describe('buildSuccessComment', () => {
+  test('non-empty changesSection — output contains both labeled sections and content', () => {
+    const commentBody = 'Please add error handling to the login function.';
+    const changesSection = '- Added try/catch around login logic\n- Returns 400 on invalid input';
+    const result = buildSuccessComment(commentBody, changesSection);
+
+    assert.ok(result.includes('### What was addressed'), 'should contain What was addressed heading');
+    assert.ok(result.includes('### What was changed'), 'should contain What was changed heading');
+    assert.ok(result.includes('> Please add error handling'), 'should blockquote the original comment');
+    assert.ok(result.includes('- Added try/catch'), 'should include changes content');
+    assert.ok(result.startsWith('✅'), 'should start with success emoji');
+  });
+
+  test('empty changesSection — fallback message present, What was addressed still shown', () => {
+    const commentBody = 'Fix the typo in README.';
+    const result = buildSuccessComment(commentBody, '');
+
+    assert.ok(result.includes('### What was addressed'), 'should still show What was addressed');
+    assert.ok(result.includes('> Fix the typo'), 'should blockquote the original comment');
+    assert.ok(result.includes('*No changes summary was generated.*'), 'should show fallback message');
+    assert.ok(!result.includes('### What was changed'), 'should not show What was changed heading with no content');
+  });
+});
+
+// T011 — length guard
+describe('buildSuccessComment — length guard', () => {
+  test('output is capped at 8000 chars and contains truncation marker when changesSection is very long', () => {
+    const commentBody = 'Please fix the thing.';
+    const changesSection = 'x'.repeat(9000);
+    const result = buildSuccessComment(commentBody, changesSection);
+
+    assert.ok(result.length <= 8000, `output should be ≤ 8000 chars, got ${result.length}`);
+    assert.ok(result.includes('… (truncated)'), 'should include truncation marker');
+  });
+});
+
+// T012 — fallback integration: Claude output has no ## Changes Made section
+describe('executePrReview — fallback: no Changes Made section', () => {
+  test('posts fallback comment and completes job when Claude output has no Changes Made section', async () => {
+    const { db, cleanup } = makeTempDb();
+    const review = makeReview(db, { comment_body: 'Fix the button alignment' });
+    const octokit = makeOctokit();
+
+    await executePrReview(db, review, octokit, makeConfig(), {
+      spawnFn: makeSpawnFn(0, ['Implementation complete. No structured section here.']),
+      execFileFn: makeExecFileFn(0),
+    });
+
+    const successComment = octokit._comments.find(c => c.startsWith('✅'));
+    assert.ok(successComment, 'success comment should still be posted');
+    assert.ok(successComment.includes('Fix the button alignment'), 'should include original comment text');
+    assert.ok(successComment.includes('*No changes summary was generated.*'), 'should show fallback message');
+
+    const job = db.prepare('SELECT * FROM pr_review_jobs WHERE id = ?').get(review.id);
+    assert.equal(job.status, 'completed', 'job should still be marked completed');
+
+    cleanup();
+  });
+});
+
+// T008 — buildSuccessComment with multi-comment batch
+describe('buildSuccessComment — multi-comment batch (US2)', () => {
+  test('all original comment sections appear in What was addressed', () => {
+    const commentBody = 'Fix error handling\n\n---\n\nAdd logging\n\n---\n\nUpdate README';
+    const changesSection = '- Fixed error handling in main handler\n- Added logging middleware\n- Updated README with new instructions';
+    const result = buildSuccessComment(commentBody, changesSection);
+
+    assert.ok(result.includes('Fix error handling'), 'should include first comment');
+    assert.ok(result.includes('Add logging'), 'should include second comment');
+    assert.ok(result.includes('Update README'), 'should include third comment');
+    assert.ok(result.includes('### What was addressed'), 'should have addressed section');
+    assert.ok(result.includes('### What was changed'), 'should have changed section');
+    assert.ok(result.includes('- Fixed error handling in main handler'), 'should include first change bullet');
+    assert.ok(result.includes('- Added logging middleware'), 'should include second change bullet');
+  });
+});
+
+// T009 — executePrReview multi-comment batch integration test
+describe('executePrReview — multi-comment success (US2)', () => {
+  test('success comment references all batched comments and change bullets', async () => {
+    const { db, cleanup } = makeTempDb();
+    const batchBody = 'Fix error handling\n\n---\n\nAdd logging';
+    const review = makeReview(db, { comment_body: batchBody });
+    const octokit = makeOctokit();
+
+    await executePrReview(db, review, octokit, makeConfig(), {
+      spawnFn: makeSpawnFn(0, [
+        'Working on the requested changes.',
+        '## Changes Made',
+        '- Fixed error handling in the request pipeline',
+        '- Added logging to capture request details',
+      ]),
+      execFileFn: makeExecFileFn(0),
+    });
+
+    const successComment = octokit._comments.find(c => c.startsWith('✅'));
+    assert.ok(successComment, 'success comment should be posted');
+    assert.ok(successComment.includes('Fix error handling'), 'should reference first comment');
+    assert.ok(successComment.includes('Add logging'), 'should reference second comment');
+    assert.ok(successComment.includes('- Fixed error handling in the request pipeline'), 'should include first change bullet');
+    assert.ok(successComment.includes('- Added logging to capture request details'), 'should include second change bullet');
+
+    cleanup();
+  });
+});
+
+// T005 — updated executePrReview successful flow integration test
+describe('executePrReview — enriched success comment (US1)', () => {
+  test('success comment contains What was addressed and What was changed sections', async () => {
+    const { db, cleanup } = makeTempDb();
+    const review = makeReview(db, { comment_body: 'Please add error handling' });
+    const octokit = makeOctokit();
+
+    await executePrReview(db, review, octokit, makeConfig(), {
+      spawnFn: makeSpawnFn(0, [
+        'Implementing the requested changes.',
+        '## Changes Made',
+        '- Added try/catch around the main handler',
+      ]),
+      execFileFn: makeExecFileFn(0),
+    });
+
+    const successComment = octokit._comments.find(c => c.startsWith('✅'));
+    assert.ok(successComment, 'success comment should be posted');
+    assert.ok(successComment.includes('What was addressed'), 'should include What was addressed section');
+    assert.ok(successComment.includes('What was changed'), 'should include What was changed section');
+    assert.ok(successComment.includes('Please add error handling'), 'should include original comment text');
+    assert.ok(!successComment.includes('Changes pushed to branch\n'), 'should not be the old bare message');
 
     cleanup();
   });
