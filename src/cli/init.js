@@ -130,7 +130,11 @@ async function enableService(platform, servicePath) {
     execSync('systemctl --user daemon-reload', { stdio: 'inherit' });
     execSync('systemctl --user enable --now cockpit-daemon', { stdio: 'inherit' });
   } else if (platform === 'darwin') {
-    execSync(`launchctl load "${servicePath}"`, { stdio: 'inherit' });
+    const result = spawnSync('launchctl', ['load', servicePath], { stdio: 'pipe' });
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString().trim();
+      throw new Error(stderr || `launchctl load exited with status ${result.status}`);
+    }
   }
 }
 
@@ -168,7 +172,6 @@ function printNextSteps(logger = console) {
   logger.log('');
   logger.log('  cockpit status          — check daemon health');
   logger.log('  cockpit start           — start the daemon (if not already running)');
-  logger.log('  specify init --here --ai claude   — initialise spec-kit in a watched repo');
   logger.log('');
   logger.log('Open a GitHub issue in a watched repo titled:');
   logger.log('  [COCKPIT] <your feature name>');
