@@ -150,6 +150,16 @@ function installSpecifyCli({ which = defaultWhich, logger = console } = {}) {
   }
 }
 
+// ─── Constitution writer ──────────────────────────────────────────────────────
+
+export function writeConstitution(localPath, { projectName, principles }) {
+  const dir = path.join(localPath, '.specify', 'memory');
+  fs.mkdirSync(dir, { recursive: true });
+  const date = new Date().toISOString().split('T')[0];
+  const content = `# ${projectName} Constitution\n\n## Core Principles\n\n${principles}\n\n**Version**: 1.0.0 | **Ratified**: ${date}\n`;
+  fs.writeFileSync(path.join(dir, 'constitution.md'), content, 'utf8');
+}
+
 // ─── Next-steps printer ──────────────────────────────────────────────────────
 
 function printNextSteps(logger = console) {
@@ -162,9 +172,6 @@ function printNextSteps(logger = console) {
   logger.log('');
   logger.log('Open a GitHub issue in a watched repo titled:');
   logger.log('  [COCKPIT] <your feature name>');
-  logger.log('');
-  logger.log('To define project principles:');
-  logger.log('  /speckit.constitution');
 }
 
 // ─── Main runInit entry point ─────────────────────────────────────────────────
@@ -180,6 +187,7 @@ export async function runInit(options = {}) {
 
   // Step 2: Collect config
   let config;
+  let constitutions = [];
   if (yes) {
     try {
       config = buildConfigFromEnv(options.env || process.env);
@@ -188,8 +196,10 @@ export async function runInit(options = {}) {
       process.exit(1);
     }
   } else {
-    config = await collectConfigInteractive({ configDir, logger });
-    if (!config) return; // user cancelled
+    const result = await collectConfigInteractive({ configDir, logger });
+    if (!result) return; // user cancelled
+    config = result.config;
+    constitutions = result.constitutions;
   }
 
   // Step 3: Validate
@@ -224,7 +234,17 @@ export async function runInit(options = {}) {
   // Step 7: Install specify-cli
   installSpecifyCli({ logger });
 
-  // Step 8: Print next steps
+  // Step 8: Write constitutions
+  for (const { localPath, projectName, principles } of constitutions) {
+    try {
+      writeConstitution(localPath, { projectName, principles });
+      logger.log(`Constitution written to ${localPath}/.specify/memory/constitution.md`);
+    } catch (err) {
+      logger.warn(`Could not write constitution for ${localPath}: ${err.message}`);
+    }
+  }
+
+  // Step 9: Print next steps
   printNextSteps(logger);
 }
 
@@ -283,11 +303,40 @@ async function collectConfigInteractive({ configDir, logger }) {
 
   outro('Config collected.');
 
+  // Prompt for constitution per repo (only for repos with existing local paths)
+  const constitutions = [];
+  for (const repo of repos) {
+    if (!fs.existsSync(repo.localPath)) continue;
+
+    const wantConstitution = await confirm({
+      message: `Define project principles for ${repo.repo}? (writes .specify/memory/constitution.md)`,
+      initialValue: true,
+    });
+    if (isCancel(wantConstitution) || !wantConstitution) continue;
+
+    const projectName = await text({
+      message: `Project name for ${repo.repo}:`,
+      defaultValue: repo.repo.split('/')[1],
+    });
+    if (isCancel(projectName)) continue;
+
+    const principles = await text({
+      message: 'Core principles (brief description of how Claude should approach work in this repo):',
+      validate: v => v.trim() ? undefined : 'Required',
+    });
+    if (isCancel(principles)) continue;
+
+    constitutions.push({ localPath: repo.localPath, projectName: projectName.trim(), principles: principles.trim() });
+  }
+
   return {
-    githubToken: token,
-    githubOwner: owner.trim(),
-    pollIntervalSeconds: 30,
-    postImplementCommand: '',
-    repos,
+    config: {
+      githubToken: token,
+      githubOwner: owner.trim(),
+      pollIntervalSeconds: 30,
+      postImplementCommand: '',
+      repos,
+    },
+    constitutions,
   };
 }
