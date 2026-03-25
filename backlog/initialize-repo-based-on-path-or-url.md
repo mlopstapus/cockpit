@@ -1,1 +1,0 @@
-When I initialize the project and install cockpit I want it to initizle using a repo (aka path from root) or a github repo address that it can clone usin your PAT. 
